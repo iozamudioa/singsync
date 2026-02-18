@@ -18,17 +18,19 @@ class NowPlayingTab extends StatefulWidget {
     required this.controller,
     required this.theme,
     required this.onSearchManually,
+    this.onExpandedLandscapeModeChanged,
   });
 
   final LyricsController controller;
   final ThemeData theme;
   final VoidCallback onSearchManually;
+  final ValueChanged<bool>? onExpandedLandscapeModeChanged;
 
   @override
   State<NowPlayingTab> createState() => _NowPlayingTabState();
 }
 
-class _NowPlayingTabState extends State<NowPlayingTab> {
+class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateMixin {
   static const String _spotifyPackage = 'com.spotify.music';
   static const String _youtubeMusicPackage = 'com.google.android.apps.youtube.music';
   static const String _amazonMusicPackage = 'com.amazon.mp3';
@@ -40,13 +42,50 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
   String _lastNowPlayingKey = '';
   bool _isCopyToastVisible = false;
   bool _isVinylExpanded = false;
+  late final AnimationController _vinylSpinController;
+  late final AnimationController _seekNudgeController;
+  late Animation<double> _seekNudgeTurns;
+  double _seekCarryTurns = 0;
+  double _seekNudgeTargetTurns = 0;
+  bool _isVinylScrubbing = false;
+  bool _isVinylTouchActive = false;
+  double _touchSeekTurns = 0;
+  double _scrubStartCarryTurns = 0;
+  int _scrubStartPositionMs = 0;
+  int _scrubPreviewPositionMs = 0;
+  int _lastScrubSeekDispatchAtMs = 0;
+  int? _lastScrubSeekDispatchedPositionMs;
+
+  static const double _dragSeekMsPerTurn = 45000;
+  static const int _dragSeekDispatchIntervalMs = 120;
+  static const int _dragSeekMinPositionDeltaMs = 500;
   Timer? _autoExpandVinylTimer;
   String? _autoExpandPendingKey;
   String? _autoExpandedForKey;
+  bool? _lastExpandedLandscapeModeReported;
 
   @override
   void initState() {
     super.initState();
+    _vinylSpinController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    );
+    _seekNudgeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    );
+    _seekNudgeTurns = const AlwaysStoppedAnimation<double>(0);
+    _seekNudgeController.addStatusListener((status) {
+      if (!mounted || status != AnimationStatus.completed) {
+        return;
+      }
+      setState(() {
+        _seekCarryTurns = (_seekCarryTurns + _seekNudgeTargetTurns) % 1.0;
+        _seekNudgeTargetTurns = 0;
+        _seekNudgeTurns = const AlwaysStoppedAnimation<double>(0);
+      });
+    });
     _queryController = TextEditingController(text: widget.controller.searchQuery)
       ..addListener(() {
         widget.controller.updateSearchQuery(_queryController.text);
@@ -55,9 +94,142 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
 
   @override
   void dispose() {
+    widget.onExpandedLandscapeModeChanged?.call(false);
     _autoExpandVinylTimer?.cancel();
+    _seekNudgeController.dispose();
+    _vinylSpinController.dispose();
     _queryController.dispose();
     super.dispose();
+  }
+
+  void _syncVinylSpinState(bool shouldSpin) {
+    if (_isVinylScrubbing) {
+      if (_vinylSpinController.isAnimating) {
+        _vinylSpinController.stop();
+      }
+      return;
+    }
+
+    if (shouldSpin) {
+      if (!_vinylSpinController.isAnimating) {
+        _vinylSpinController.repeat();
+      }
+      return;
+    }
+
+    if (_vinylSpinController.isAnimating) {
+      _vinylSpinController.stop();
+    }
+  }
+
+  bool get _canScrubVinyl {
+    final controller = widget.controller;
+    return controller.isNowPlayingFromMediaPlayer && controller.hasActiveNowPlaying;
+  }
+
+  void _onVinylScrubStart() {
+    if (!_canScrubVinyl) {
+      return;
+    }
+
+    _seekNudgeController.stop();
+    _seekNudgeTargetTurns = 0;
+    _seekNudgeTurns = const AlwaysStoppedAnimation<double>(0);
+    _touchSeekTurns = 0;
+    _scrubStartCarryTurns = _seekCarryTurns;
+    _scrubStartPositionMs = widget.controller.nowPlayingPlaybackPositionMs;
+    _scrubPreviewPositionMs = _scrubStartPositionMs;
+    _lastScrubSeekDispatchAtMs = 0;
+    _lastScrubSeekDispatchedPositionMs = null;
+
+    if (!_isVinylScrubbing) {
+      setState(() {
+        _isVinylScrubbing = true;
+      });
+    }
+  }
+
+  Future<void> _onVinylScrubUpdate(double deltaTurns) async {
+    if (!_isVinylScrubbing || !_canScrubVinyl) {
+      return;
+    }
+
+    _touchSeekTurns += deltaTurns;
+    final offsetMs = (_touchSeekTurns * _dragSeekMsPerTurn).round();
+    final candidateMs = (_scrubStartPositionMs + offsetMs).clamp(0, 1 << 31).toInt();
+    _scrubPreviewPositionMs = candidateMs;
+
+    setState(() {
+      _seekCarryTurns = (_scrubStartCarryTurns + _touchSeekTurns) % 1.0;
+    });
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final enoughTime = now - _lastScrubSeekDispatchAtMs >= _dragSeekDispatchIntervalMs;
+    final previous = _lastScrubSeekDispatchedPositionMs;
+    final enoughDelta =
+        previous == null || (candidateMs - previous).abs() >= _dragSeekMinPositionDeltaMs;
+    if (!enoughTime || !enoughDelta) {
+      return;
+    }
+
+    _lastScrubSeekDispatchAtMs = now;
+    _lastScrubSeekDispatchedPositionMs = candidateMs;
+    await widget.controller.seekNowPlayingTo(candidateMs);
+  }
+
+  Future<void> _onVinylScrubEnd() async {
+    if (!_isVinylScrubbing || !_canScrubVinyl) {
+      return;
+    }
+
+    final targetMs = _scrubPreviewPositionMs;
+    setState(() {
+      _isVinylScrubbing = false;
+    });
+    await widget.controller.seekNowPlayingTo(targetMs);
+  }
+
+  void _onVinylTouchActiveChanged(bool isActive) {
+    if (_isVinylTouchActive == isActive) {
+      return;
+    }
+    setState(() {
+      _isVinylTouchActive = isActive;
+    });
+  }
+
+  void _animateVinylSeekNudge({
+    required int fromMs,
+    required int toMs,
+  }) {
+    final deltaMs = toMs - fromMs;
+    if (deltaMs == 0) {
+      return;
+    }
+
+    final normalized = (deltaMs.abs() / 14000).clamp(0.10, 0.24);
+    final direction = deltaMs > 0 ? 1.0 : -1.0;
+    final targetTurns = normalized * direction;
+    _seekNudgeTargetTurns = targetTurns;
+
+    _seekNudgeController.stop();
+    _seekNudgeController.duration = const Duration(milliseconds: 220);
+    setState(() {
+      _seekNudgeTurns = Tween<double>(
+        begin: 0,
+        end: targetTurns,
+      ).animate(CurvedAnimation(
+        parent: _seekNudgeController,
+        curve: Curves.easeOutCubic,
+      ));
+    });
+    _seekNudgeController.forward(from: 0);
+  }
+
+  void _onNowPlayingTimedLineTap(int targetMs) {
+    final currentMs = widget.controller.nowPlayingPlaybackPositionMs;
+    _animateVinylSeekNudge(fromMs: currentMs, toMs: targetMs);
+    widget.controller.seekNowPlayingTo(targetMs);
   }
 
   void _syncSearchInputWithController() {
@@ -407,9 +579,13 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
 
   Widget _buildExpandedVinylArea({required bool isLandscape, required BoxConstraints constraints}) {
     final controller = widget.controller;
-    final artworkUrl = controller.nowPlayingArtworkUrl;
+    final theme = widget.theme;
+    final artworkUrl = controller.isAdLikeNowPlaying ? null : controller.nowPlayingArtworkUrl;
     final hasActiveNowPlaying = controller.hasActiveNowPlaying;
     final canOpenMediaApps = controller.hasNotificationListenerAccess;
+    final adSourceIcon = controller.isAdLikeNowPlaying
+        ? _activePlayerIcon(controller.nowPlayingSourcePackage ?? controller.preferredMediaAppPackage)
+        : null;
 
     final viewPadding = MediaQuery.of(context).viewPadding;
     final insetDelta = viewPadding.right - viewPadding.left;
@@ -420,6 +596,84 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
     final size = isLandscape
         ? math.min(360.0, math.max(220.0, constraints.maxHeight * 0.72))
         : math.min(380.0, math.max(220.0, constraints.maxWidth * 0.86));
+    final collapsedSizeEstimate = isLandscape
+      ? math.min(420.0, math.max(280.0, constraints.maxHeight * 0.66))
+      : math.min(250.0, math.max(180.0, constraints.maxWidth * 0.64));
+    final startDx = isLandscape ? -constraints.maxWidth * 0.18 : 0.0;
+    final startDy = isLandscape ? -constraints.maxHeight * 0.06 : -constraints.maxHeight * 0.21;
+    final displayTitle = controller.songTitle.trim().isEmpty
+      ? 'Now Playing'
+      : controller.songTitle.trim();
+    final displayArtist = controller.artistName.trim().isEmpty
+      ? 'Artista desconocido'
+      : controller.artistName.trim();
+
+    Widget buildRightControlsColumn() {
+      if (hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer) {
+        final shortestSide = math.min(constraints.maxWidth, constraints.maxHeight);
+        final iconSize = shortestSide >= 700 ? 42.0 : 36.0;
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: controller.mediaPrevious,
+                  icon: const Icon(Icons.skip_previous_rounded),
+                  iconSize: iconSize,
+                  tooltip: 'Anterior',
+                ),
+                const SizedBox(width: 2),
+                IconButton(
+                  onPressed: controller.mediaPlayPause,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  iconSize: iconSize + 4,
+                  tooltip: 'Play/Pause',
+                ),
+                const SizedBox(width: 2),
+                IconButton(
+                  onPressed: controller.mediaNext,
+                  icon: const Icon(Icons.skip_next_rounded),
+                  iconSize: iconSize,
+                  tooltip: 'Siguiente',
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildActivePlayerButton(),
+            if (controller.canShowManualSearchButton) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _onSearchManuallyPressed,
+                icon: const MusicSearchIcon(size: 18),
+                label: const Text('Buscar manualmente'),
+              ),
+            ],
+          ],
+        );
+      }
+
+      if (hasActiveNowPlaying || canOpenMediaApps) {
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildPlatformButtonsRow(artistOnly: false),
+            if (controller.canShowManualSearchButton) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _onSearchManuallyPressed,
+                icon: const MusicSearchIcon(size: 18),
+                label: const Text('Buscar manualmente'),
+              ),
+            ],
+          ],
+        );
+      }
+
+      return const SizedBox.shrink();
+    }
 
     return SizedBox.expand(
       child: Stack(
@@ -432,22 +686,131 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
           Center(
             child: Transform.translate(
               offset: Offset(landscapeOpticalDx, 0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ArtworkCover(
-                    url: artworkUrl,
-                    size: size,
-                    isSpinning: controller.isNowPlayingPlaybackActive,
-                    onTap: _toggleVinylExpanded,
-                  ),
-                  const SizedBox(height: 14),
-                  if (hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer) ...[
-                    _buildPlayerControlsRow(),
-                    _buildActivePlayerButton(),
-                  ] else if (hasActiveNowPlaying || canOpenMediaApps)
-                    _buildPlatformButtonsRow(artistOnly: false),
-                ],
+              child: TweenAnimationBuilder<double>(
+                duration: const Duration(milliseconds: 360),
+                curve: Curves.easeOutCubic,
+                tween: Tween(begin: 0, end: 1),
+                builder: (context, progress, _) {
+                  final animatedSize = ui.lerpDouble(collapsedSizeEstimate, size, progress)!;
+
+                  if (!isLandscape) {
+                    return Transform.translate(
+                      offset: Offset(startDx * (1 - progress), startDy * (1 - progress)),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _ArtworkCover(
+                            url: artworkUrl,
+                            size: animatedSize,
+                            isSpinning: controller.isNowPlayingPlaybackActive,
+                            spinAnimation: _vinylSpinController,
+                            seekOffsetTurns: _seekNudgeTurns,
+                            seekCarryTurns: _seekCarryTurns,
+                            canScrub: _canScrubVinyl,
+                            onTouchActiveChanged: _onVinylTouchActiveChanged,
+                            onScrubStart: _onVinylScrubStart,
+                            onScrubUpdate: _onVinylScrubUpdate,
+                            onScrubEnd: _onVinylScrubEnd,
+                            centerIcon: adSourceIcon,
+                            onTap: _toggleVinylExpanded,
+                          ),
+                          const SizedBox(height: 14),
+                          if (hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer) ...[
+                            _buildPlayerControlsRow(),
+                            _buildActivePlayerButton(),
+                          ] else if (hasActiveNowPlaying || canOpenMediaApps)
+                            _buildPlatformButtonsRow(artistOnly: false),
+                        ],
+                      ),
+                    );
+                  }
+
+                  final maxVinylSizeByWidth = (constraints.maxWidth * 0.95).clamp(220.0, 980.0);
+                  final maxVinylSizeByHeight = (constraints.maxHeight * 0.92).clamp(220.0, 980.0);
+                  final landscapeTargetSize = math.min(maxVinylSizeByWidth, maxVinylSizeByHeight);
+                  final landscapeAnimatedSize = ui.lerpDouble(
+                    collapsedSizeEstimate,
+                    landscapeTargetSize,
+                    progress,
+                  )!;
+
+                  return Transform.translate(
+                    offset: Offset(startDx * (1 - progress), startDy * (1 - progress)),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Center(
+                          child: _ArtworkCover(
+                            url: artworkUrl,
+                            size: landscapeAnimatedSize,
+                            isSpinning: controller.isNowPlayingPlaybackActive,
+                            spinAnimation: _vinylSpinController,
+                            seekOffsetTurns: _seekNudgeTurns,
+                            seekCarryTurns: _seekCarryTurns,
+                            canScrub: _canScrubVinyl,
+                            onTouchActiveChanged: _onVinylTouchActiveChanged,
+                            onScrubStart: _onVinylScrubStart,
+                            onScrubUpdate: _onVinylScrubUpdate,
+                            onScrubEnd: _onVinylScrubEnd,
+                            centerIcon: adSourceIcon,
+                            onTap: _toggleVinylExpanded,
+                          ),
+                        ),
+                        Positioned(
+                          left: 10,
+                          top: 0,
+                          bottom: 56,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: SizedBox(
+                              width: math.min(260.0, math.max(140.0, constraints.maxWidth * 0.22)),
+                              child: IgnorePointer(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      displayTitle,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.left,
+                                      style: theme.textTheme.titleLarge?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        color: theme.colorScheme.onSurface.withOpacity(0.96),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      displayArtist,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.left,
+                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w500,
+                                        color: theme.colorScheme.onSurface.withOpacity(0.78),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 8,
+                          top: 0,
+                          bottom: 56,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                              child: buildRightControlsColumn(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -914,6 +1277,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
     final controller = widget.controller;
     final theme = widget.theme;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final isExpandedLandscapeMode = isLandscape && _isVinylExpanded;
     final hasActiveNowPlaying = controller.hasActiveNowPlaying;
     final canOpenMediaApps = controller.hasNotificationListenerAccess;
     _isLandscapeLayout = isLandscape;
@@ -925,11 +1289,18 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
       _isNowPlayingHeaderVisible = true;
       _autoExpandVinylTimer?.cancel();
       _autoExpandPendingKey = null;
+      _vinylSpinController.value = 0;
     }
     if (isLandscape) {
       _isNowPlayingHeaderVisible = true;
     }
 
+    if (_lastExpandedLandscapeModeReported != isExpandedLandscapeMode) {
+      _lastExpandedLandscapeModeReported = isExpandedLandscapeMode;
+      widget.onExpandedLandscapeModeChanged?.call(isExpandedLandscapeMode);
+    }
+
+    _syncVinylSpinState(controller.isNowPlayingPlaybackActive);
     _handleAutoExpandOnManualPrompt(
       controller: controller,
       nowPlayingKey: currentNowPlayingKey,
@@ -939,11 +1310,13 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
       onRefresh: controller.refreshAll,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            children: [
-              SizedBox(
-                height: constraints.maxHeight,
+          return CustomScrollView(
+            physics: (_isVinylTouchActive || _isVinylScrubbing)
+                ? const NeverScrollableScrollPhysics()
+                : const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverFillRemaining(
+                hasScrollBody: false,
                 child: AnimatedPadding(
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
@@ -953,25 +1326,22 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeInCubic,
                     layoutBuilder: (currentChild, previousChildren) {
-                      return Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          ...previousChildren,
-                          if (currentChild != null) currentChild,
-                        ],
-                      );
+                      return currentChild ?? const SizedBox.shrink();
                     },
                     transitionBuilder: (child, animation) {
-                      final fade = CurvedAnimation(
+                      final curved = CurvedAnimation(
                         parent: animation,
-                        curve: Curves.easeOut,
+                        curve: Curves.easeOutCubic,
+                        reverseCurve: Curves.easeInCubic,
                       );
-                      final scale = Tween<double>(begin: 0.94, end: 1.0).animate(
-                        CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-                      );
+                      final scale = Tween<double>(begin: 0.92, end: 1.0).animate(curved);
+                      final slide = Tween<Offset>(
+                        begin: const Offset(0, 0.025),
+                        end: Offset.zero,
+                      ).animate(curved);
 
-                      return FadeTransition(
-                        opacity: fade,
+                      return SlideTransition(
+                        position: slide,
                         child: ScaleTransition(
                           scale: scale,
                           child: child,
@@ -993,12 +1363,12 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             SizedBox(
-                              width: math.min(380, constraints.maxWidth * 0.40),
+                              width: math.min(420, constraints.maxWidth * 0.46),
                               child: LayoutBuilder(
                                 builder: (context, sideConstraints) {
                                   final artworkSize = math.min(
-                                    380.0,
-                                    math.max(250.0, sideConstraints.maxHeight * 0.58),
+                                    420.0,
+                                    math.max(280.0, sideConstraints.maxHeight * 0.66),
                                   );
 
                                   return Column(
@@ -1017,9 +1387,25 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
                                           children: [
                                             Center(
                                               child: _ArtworkCover(
-                                                url: controller.nowPlayingArtworkUrl,
+                                                url: controller.isAdLikeNowPlaying
+                                                    ? null
+                                                    : controller.nowPlayingArtworkUrl,
                                                 size: artworkSize,
                                                 isSpinning: controller.isNowPlayingPlaybackActive,
+                                                spinAnimation: _vinylSpinController,
+                                                seekOffsetTurns: _seekNudgeTurns,
+                                                seekCarryTurns: _seekCarryTurns,
+                                                canScrub: _canScrubVinyl,
+                                                onTouchActiveChanged: _onVinylTouchActiveChanged,
+                                                onScrubStart: _onVinylScrubStart,
+                                                onScrubUpdate: _onVinylScrubUpdate,
+                                                onScrubEnd: _onVinylScrubEnd,
+                                                centerIcon: controller.isAdLikeNowPlaying
+                                                    ? _activePlayerIcon(
+                                                        controller.nowPlayingSourcePackage ??
+                                                            controller.preferredMediaAppPackage,
+                                                      )
+                                                    : null,
                                                 onTap: _toggleVinylExpanded,
                                               ),
                                             ),
@@ -1086,7 +1472,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
                                       playbackPositionMs: controller.nowPlayingPlaybackPositionMs,
                                       songTitle: controller.songTitle,
                                       artistName: controller.artistName,
-                                      onTimedLineTap: controller.seekNowPlayingTo,
+                                        onTimedLineTap: _onNowPlayingTimedLineTap,
                                       showActionButtons: controller.hasActiveNowPlayingLyrics,
                                       onCopyFeedbackVisibleChanged:
                                           _handleCopyFeedbackVisibility,
@@ -1116,14 +1502,30 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
                                   LayoutBuilder(
                                     builder: (context, headerConstraints) {
                                       final responsiveSize = math.min(
-                                        210.0,
-                                        math.max(150.0, headerConstraints.maxWidth * 0.56),
+                                        250.0,
+                                        math.max(180.0, headerConstraints.maxWidth * 0.64),
                                       );
                                       return Center(
                                         child: _ArtworkCover(
-                                          url: controller.nowPlayingArtworkUrl,
+                                          url: controller.isAdLikeNowPlaying
+                                              ? null
+                                              : controller.nowPlayingArtworkUrl,
                                           size: responsiveSize,
                                           isSpinning: controller.isNowPlayingPlaybackActive,
+                                          spinAnimation: _vinylSpinController,
+                                          seekOffsetTurns: _seekNudgeTurns,
+                                          seekCarryTurns: _seekCarryTurns,
+                                          canScrub: _canScrubVinyl,
+                                          onTouchActiveChanged: _onVinylTouchActiveChanged,
+                                          onScrubStart: _onVinylScrubStart,
+                                          onScrubUpdate: _onVinylScrubUpdate,
+                                          onScrubEnd: _onVinylScrubEnd,
+                                          centerIcon: controller.isAdLikeNowPlaying
+                                              ? _activePlayerIcon(
+                                                  controller.nowPlayingSourcePackage ??
+                                                      controller.preferredMediaAppPackage,
+                                                )
+                                              : null,
                                           onTap: _toggleVinylExpanded,
                                         ),
                                       );
@@ -1158,7 +1560,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> {
                                       playbackPositionMs: controller.nowPlayingPlaybackPositionMs,
                                       songTitle: controller.songTitle,
                                       artistName: controller.artistName,
-                                      onTimedLineTap: controller.seekNowPlayingTo,
+                                        onTimedLineTap: _onNowPlayingTimedLineTap,
                                       showActionButtons: controller.hasActiveNowPlayingLyrics,
                                       onCopyFeedbackVisibleChanged:
                                           _handleCopyFeedbackVisibility,
@@ -1231,12 +1633,30 @@ class _CandidatesList extends StatelessWidget {
 class _ArtworkCover extends StatelessWidget {
   const _ArtworkCover({
     required this.url,
+    required this.spinAnimation,
+    required this.seekOffsetTurns,
+    required this.seekCarryTurns,
+    required this.canScrub,
+    required this.onTouchActiveChanged,
+    required this.onScrubStart,
+    required this.onScrubUpdate,
+    required this.onScrubEnd,
+    this.centerIcon,
     this.size = 122,
     this.isSpinning = false,
     required this.onTap,
   });
 
   final String? url;
+  final Animation<double> spinAnimation;
+  final Animation<double> seekOffsetTurns;
+  final double seekCarryTurns;
+  final bool canScrub;
+  final ValueChanged<bool> onTouchActiveChanged;
+  final VoidCallback onScrubStart;
+  final ValueChanged<double> onScrubUpdate;
+  final Future<void> Function() onScrubEnd;
+  final IconData? centerIcon;
   final double size;
   final bool isSpinning;
   final VoidCallback onTap;
@@ -1244,19 +1664,35 @@ class _ArtworkCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final vinylColor = theme.colorScheme.onSurface.withOpacity(0.88);
-    final grooveColor = theme.colorScheme.onSurface.withOpacity(0.18);
-    final labelColor = theme.colorScheme.surface.withOpacity(0.82);
+    final isDark = theme.brightness == Brightness.dark;
+    final vinylBaseColor = Color.lerp(Colors.black, theme.colorScheme.onSurface, 0.12)!;
+    final grooveColor = Color.lerp(Colors.white, theme.colorScheme.onSurface, 0.35)!
+        .withOpacity(isDark ? 0.10 : 0.14);
+    final separatorColor = isDark ? Colors.white.withOpacity(0.78) : Colors.black.withOpacity(0.68);
+    final centerLabelColor = Color.lerp(theme.colorScheme.surface, theme.colorScheme.surfaceContainerHighest, 0.55)!;
+    final centerArtworkSize = size * 0.50;
+    final separatorOuterSize = size * 0.56;
 
     return Center(
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(size),
-        child: InkWell(
+        child: _VinylGestureSurface(
+          size: size,
+          canScrub: canScrub,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(size),
-          child: _VinylSpinner(
-            isSpinning: isSpinning,
+          onTouchActiveChanged: onTouchActiveChanged,
+          onScrubStart: onScrubStart,
+          onScrubUpdate: onScrubUpdate,
+          onScrubEnd: onScrubEnd,
+          child: AnimatedBuilder(
+            animation: Listenable.merge([spinAnimation, seekOffsetTurns]),
+            builder: (context, child) {
+              return Transform.rotate(
+                angle: (spinAnimation.value + seekCarryTurns + seekOffsetTurns.value) * 2 * math.pi,
+                child: child,
+              );
+            },
             child: SizedBox(
               width: size,
               height: size,
@@ -1268,64 +1704,96 @@ class _ArtworkCover extends StatelessWidget {
                     height: size,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: vinylColor,
+                      color: vinylBaseColor,
+                    ),
+                  ),
+                  CustomPaint(
+                    size: Size.square(size),
+                    painter: _VinylGroovesPainter(
+                      grooveColor: grooveColor,
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: ClipOval(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.white.withOpacity(isDark ? 0.20 : 0.16),
+                              Colors.white.withOpacity(0.04),
+                              Colors.transparent,
+                              Colors.black.withOpacity(isDark ? 0.18 : 0.10),
+                            ],
+                            stops: const [0.0, 0.24, 0.55, 1.0],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   Container(
-                    width: size * 0.86,
-                    height: size * 0.86,
+                    width: separatorOuterSize,
+                    height: separatorOuterSize,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: grooveColor, width: 1.2),
-                    ),
-                  ),
-                  Container(
-                    width: size * 0.72,
-                    height: size * 0.72,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: grooveColor, width: 1.1),
-                    ),
-                  ),
-                  Container(
-                    width: size * 0.58,
-                    height: size * 0.58,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: grooveColor, width: 1.0),
+                      border: Border.all(
+                        color: separatorColor,
+                        width: math.max(1.6, size * 0.014),
+                      ),
                     ),
                   ),
                   ClipOval(
                     child: (url ?? '').trim().isNotEmpty
                         ? Image.network(
                             url!,
-                            width: size * 0.64,
-                            height: size * 0.64,
+                            width: centerArtworkSize,
+                            height: centerArtworkSize,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) {
                               return Container(
-                                width: size * 0.64,
-                                height: size * 0.64,
-                                color: theme.colorScheme.surfaceContainerHighest,
+                                width: centerArtworkSize,
+                                height: centerArtworkSize,
+                                color: centerLabelColor,
                                 alignment: Alignment.center,
                                 child: const Icon(Icons.album_rounded, size: 30),
                               );
                             },
                           )
                         : Container(
-                            width: size * 0.64,
-                            height: size * 0.64,
-                            color: theme.colorScheme.surfaceContainerHighest,
+                            width: centerArtworkSize,
+                            height: centerArtworkSize,
+                            color: centerLabelColor,
                             alignment: Alignment.center,
-                            child: const Icon(Icons.album_rounded, size: 30),
+                            child: centerIcon != null
+                                ? Icon(
+                                    centerIcon,
+                                    size: size * 0.26,
+                                    color: theme.colorScheme.onSurface,
+                                  )
+                                : const Icon(Icons.album_rounded, size: 30),
                           ),
                   ),
                   Container(
-                    width: size * 0.1,
-                    height: size * 0.1,
+                    width: size * 0.072,
+                    height: size * 0.072,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: labelColor,
+                      color: theme.colorScheme.surface,
+                      border: Border.all(
+                        color: theme.colorScheme.onSurface.withOpacity(0.55),
+                        width: 1,
+                      ),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: size * 0.026,
+                        height: size * 0.026,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: theme.colorScheme.onSurface.withOpacity(0.9),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1338,66 +1806,140 @@ class _ArtworkCover extends StatelessWidget {
   }
 }
 
-class _VinylSpinner extends StatefulWidget {
-  const _VinylSpinner({
+class _VinylGestureSurface extends StatefulWidget {
+  const _VinylGestureSurface({
+    required this.size,
+    required this.canScrub,
+    required this.onTap,
+    required this.onTouchActiveChanged,
+    required this.onScrubStart,
+    required this.onScrubUpdate,
+    required this.onScrubEnd,
     required this.child,
-    required this.isSpinning,
   });
 
+  final double size;
+  final bool canScrub;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onTouchActiveChanged;
+  final VoidCallback onScrubStart;
+  final ValueChanged<double> onScrubUpdate;
+  final Future<void> Function() onScrubEnd;
   final Widget child;
-  final bool isSpinning;
 
   @override
-  State<_VinylSpinner> createState() => _VinylSpinnerState();
+  State<_VinylGestureSurface> createState() => _VinylGestureSurfaceState();
 }
 
-class _VinylSpinnerState extends State<_VinylSpinner> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
+class _VinylGestureSurfaceState extends State<_VinylGestureSurface> {
+  bool _isScrubbing = false;
+  double? _lastAngle;
 
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 8),
-    );
-
-    if (widget.isSpinning) {
-      _controller.repeat();
-    }
+  double _angleFromPoint(Offset localPoint) {
+    final center = Offset(widget.size / 2, widget.size / 2);
+    return math.atan2(localPoint.dy - center.dy, localPoint.dx - center.dx);
   }
 
-  @override
-  void didUpdateWidget(covariant _VinylSpinner oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isSpinning == widget.isSpinning) {
-      return;
+  double _normalizeDelta(double delta) {
+    if (delta > math.pi) {
+      return delta - (2 * math.pi);
     }
-
-    if (widget.isSpinning) {
-      _controller.repeat();
-    } else {
-      _controller.stop();
+    if (delta < -math.pi) {
+      return delta + (2 * math.pi);
     }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    return delta;
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      child: widget.child,
-      builder: (context, child) {
-        return Transform.rotate(
-          angle: _controller.value * 2 * math.pi,
-          child: child,
-        );
-      },
+    return Listener(
+      onPointerDown: (_) => widget.onTouchActiveChanged(true),
+      onPointerUp: (_) => widget.onTouchActiveChanged(false),
+      onPointerCancel: (_) => widget.onTouchActiveChanged(false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        onPanStart: widget.canScrub
+            ? (details) {
+                _isScrubbing = true;
+                _lastAngle = _angleFromPoint(details.localPosition);
+                widget.onScrubStart();
+              }
+            : null,
+        onPanUpdate: widget.canScrub
+            ? (details) {
+                if (!_isScrubbing) {
+                  return;
+                }
+                final nextAngle = _angleFromPoint(details.localPosition);
+                final previousAngle = _lastAngle;
+                _lastAngle = nextAngle;
+                if (previousAngle == null) {
+                  return;
+                }
+                final delta = _normalizeDelta(nextAngle - previousAngle);
+                widget.onScrubUpdate(delta / (2 * math.pi));
+              }
+            : null,
+        onPanEnd: widget.canScrub
+            ? (_) {
+                if (!_isScrubbing) {
+                  return;
+                }
+                _isScrubbing = false;
+                _lastAngle = null;
+                widget.onTouchActiveChanged(false);
+                unawaited(widget.onScrubEnd());
+              }
+            : null,
+        onPanCancel: widget.canScrub
+            ? () {
+                if (!_isScrubbing) {
+                  return;
+                }
+                _isScrubbing = false;
+                _lastAngle = null;
+                widget.onTouchActiveChanged(false);
+                unawaited(widget.onScrubEnd());
+              }
+            : null,
+        child: widget.child,
+      ),
     );
+  }
+}
+
+class _VinylGroovesPainter extends CustomPainter {
+  const _VinylGroovesPainter({
+    required this.grooveColor,
+  });
+
+  final Color grooveColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final maxRadius = size.width / 2;
+    final minRadius = maxRadius * 0.37;
+    final tracks = 24;
+
+    for (var index = 0; index < tracks; index++) {
+      final t = index / (tracks - 1);
+      final radius = ui.lerpDouble(minRadius, maxRadius * 0.97, t)!;
+      final opacity = 0.12 + (0.10 * (1 - t));
+      final stroke = 0.8 + (0.35 * (1 - t));
+
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = grooveColor.withOpacity(opacity);
+
+      canvas.drawCircle(center, radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _VinylGroovesPainter oldDelegate) {
+    return oldDelegate.grooveColor != grooveColor;
   }
 }

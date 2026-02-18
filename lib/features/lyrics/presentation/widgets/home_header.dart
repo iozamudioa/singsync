@@ -112,7 +112,7 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
                       child: FutureBuilder<PackageInfo>(
                         future: _packageInfoFuture,
                         builder: (context, snapshot) {
-                          final version = snapshot.data?.version ?? '1.0.0';
+                          final version = snapshot.data?.version ?? '1.1.0';
                           return Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,

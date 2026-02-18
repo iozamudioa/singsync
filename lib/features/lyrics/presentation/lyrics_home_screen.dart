@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -23,6 +24,25 @@ class LyricsHomeScreen extends StatefulWidget {
 
 class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBindingObserver {
   bool _isPermissionDialogOpen = false;
+  bool _hideHomeHeaderForExpandedVinyl = false;
+  bool? _lastWakeLockDesired;
+
+  void _syncWakeLockWithPlayback({required bool shouldKeepAwake}) {
+    if (_lastWakeLockDesired == shouldKeepAwake) {
+      return;
+    }
+    _lastWakeLockDesired = shouldKeepAwake;
+    unawaited(shouldKeepAwake ? WakelockPlus.enable() : WakelockPlus.disable());
+  }
+
+  void _handleExpandedLandscapeModeChanged(bool isExpandedLandscapeMode) {
+    if (_hideHomeHeaderForExpandedVinyl == isExpandedLandscapeMode) {
+      return;
+    }
+    setState(() {
+      _hideHomeHeaderForExpandedVinyl = isExpandedLandscapeMode;
+    });
+  }
 
   void _schedulePermissionCheck({Duration delay = const Duration(milliseconds: 350)}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -218,7 +238,9 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WakelockPlus.enable();
+    _syncWakeLockWithPlayback(
+      shouldKeepAwake: widget.controller.isNowPlayingPlaybackActive,
+    );
     _schedulePermissionCheck();
   }
 
@@ -232,7 +254,9 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      WakelockPlus.enable();
+      _syncWakeLockWithPlayback(
+        shouldKeepAwake: widget.controller.isNowPlayingPlaybackActive,
+      );
       _schedulePermissionCheck(delay: const Duration(milliseconds: 450));
       return;
     }
@@ -292,6 +316,9 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       builder: (context, _) {
         final theme = Theme.of(context);
         final artworkUrl = widget.controller.nowPlayingArtworkUrl;
+        _syncWakeLockWithPlayback(
+          shouldKeepAwake: widget.controller.isNowPlayingPlaybackActive,
+        );
 
         return Scaffold(
           body: Stack(
@@ -333,14 +360,15 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      HomeHeader(
-                        theme: theme,
-                        songTitle: widget.controller.songTitle,
-                        artistName: widget.controller.artistName,
-                        isDarkMode: widget.themeController.isDarkMode,
-                        onToggleTheme: widget.themeController.toggleTheme,
-                        onHeaderTap: _showArtistInfoModal,
-                      ),
+                      if (!_hideHomeHeaderForExpandedVinyl)
+                        HomeHeader(
+                          theme: theme,
+                          songTitle: widget.controller.songTitle,
+                          artistName: widget.controller.artistName,
+                          isDarkMode: widget.themeController.isDarkMode,
+                          onToggleTheme: widget.themeController.toggleTheme,
+                          onHeaderTap: _showArtistInfoModal,
+                        ),
                       if (!widget.controller.hasNotificationListenerAccess) ...[
                         const SizedBox(height: 12),
                         Card(
@@ -375,6 +403,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                           controller: widget.controller,
                           theme: theme,
                           onSearchManually: widget.controller.startManualCandidatesFromNowPlaying,
+                          onExpandedLandscapeModeChanged: _handleExpandedLandscapeModeChanged,
                         ),
                       ),
                     ],

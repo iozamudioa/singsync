@@ -26,10 +26,13 @@ class LyricsController extends ChangeNotifier {
   bool _disposed = false;
 
   static const String _notFoundMessage = 'No se encontró letra para esta canción en lrclib.';
-    static const String _permissionMissingMessage =
+  static const String _permissionMissingMessage =
       'Activa el acceso a notificaciones para esta app y reproduce una canción para cargar su letra.';
-    static const String _waitingPlaybackMessage =
-        'Permiso activo. Comienza a reproducir una canción para detectar el now playing y cargar la letra.';
+  static const String _waitingPlaybackMessage =
+      'Permiso activo. Comienza a reproducir una canción para detectar el now playing y cargar la letra.';
+  static const String _adDetectedMessage =
+      'Anuncio detectado. Esperando el siguiente cambio de canción...';
+    static const String _tuningLyricsMessage = 'Sintonizando letra ...';
   static const int _autoRetryAttempts = 5;
   static const Duration _autoRetryDelay = Duration(seconds: 2);
   static const List<String> knownMediaAppPackages = <String>[
@@ -50,6 +53,7 @@ class LyricsController extends ChangeNotifier {
   String? nowPlayingArtworkUrl;
   bool hasNotificationListenerAccess = false;
   bool isLoadingNowPlayingLyrics = false;
+  bool isAdLikeNowPlaying = false;
   int nowPlayingPlaybackPositionMs = 0;
   bool isNowPlayingPlaybackActive = false;
   bool hasActiveNowPlaying = false;
@@ -116,7 +120,7 @@ class LyricsController extends ChangeNotifier {
       nowTitle != 'Now Playing') {
       final requestId = ++_nowPlayingRequestId;
       isLoadingNowPlayingLyrics = true;
-      nowPlayingLyrics = 'Actualizando letra en lrclib...';
+      nowPlayingLyrics = _tuningLyricsMessage;
       _notifySafely();
 
       final normalizedTitle = _normalizeTitleForAutoSearch(nowTitle);
@@ -238,6 +242,7 @@ class LyricsController extends ChangeNotifier {
     isNowPlayingPlaybackActive = false;
     nowPlayingPlaybackPositionMs = 0;
     isLoadingNowPlayingLyrics = false;
+    isAdLikeNowPlaying = false;
     nowPlayingSourceType = '';
     nowPlayingSourcePackage = null;
     songTitle = 'Now Playing';
@@ -316,7 +321,7 @@ class LyricsController extends ChangeNotifier {
       isManualSearchMode = false;
       isManualSearchFormVisible = false;
       isLoadingNowPlayingLyrics = true;
-      nowPlayingLyrics = 'Reintentando búsqueda en lrclib... ($attempt/$maxAttempts)';
+      nowPlayingLyrics = _tuningLyricsMessage;
       _notifySafely();
 
       final normalizedTitle = _normalizeTitleForAutoSearch(title);
@@ -544,8 +549,26 @@ class LyricsController extends ChangeNotifier {
       nowPlayingPlaybackPositionMs = 0;
       isNowPlayingPlaybackActive = false;
     }
+
+    final isAdLikeTrack = _looksLikeAdOrAnnouncement(
+      title: title,
+      artist: artist,
+    );
+
+    if (isAdLikeTrack) {
+      isLoadingNowPlayingLyrics = false;
+      isAdLikeNowPlaying = true;
+      nowPlayingLyrics = _adDetectedMessage;
+      if (artworkFromEvent != null && artworkFromEvent.isNotEmpty) {
+        nowPlayingArtworkUrl = artworkFromEvent;
+      }
+      _notifySafely();
+      return;
+    }
+
     isLoadingNowPlayingLyrics = true;
-    nowPlayingLyrics = 'Buscando letra en lrclib...';
+    isAdLikeNowPlaying = false;
+    nowPlayingLyrics = _tuningLyricsMessage;
     if (artworkFromEvent != null && artworkFromEvent.isNotEmpty) {
       nowPlayingArtworkUrl = artworkFromEvent;
     }
@@ -662,7 +685,7 @@ class LyricsController extends ChangeNotifier {
       }
 
       if (attempt > 1) {
-        nowPlayingLyrics = 'Reintentando búsqueda en lrclib... ($attempt/$_autoRetryAttempts)';
+        nowPlayingLyrics = _tuningLyricsMessage;
         _notifySafely();
       }
 
@@ -904,7 +927,7 @@ class LyricsController extends ChangeNotifier {
     final requestId = ++_nowPlayingRequestId;
 
     isLoadingNowPlayingLyrics = true;
-    nowPlayingLyrics = 'Reintentando búsqueda en lrclib...';
+    nowPlayingLyrics = _tuningLyricsMessage;
     _notifySafely();
 
     final normalizedTitle = _normalizeTitleForAutoSearch(title);
@@ -1210,9 +1233,11 @@ class LyricsController extends ChangeNotifier {
       'esperando notificación',
       'permiso activo. comienza a reproducir una canción',
       'permiso activo. reproduce una canción',
+      'anuncio detectado. esperando el siguiente cambio de canción',
       'buscando letra en lrclib',
       'actualizando letra en lrclib',
       'reintentando búsqueda en lrclib',
+      'sintonizando letra',
       'no se encontró letra para esta canción en lrclib',
       'no se encontro letra para esta canción en lrclib',
       'no se encontro letra para esta cancion en lrclib',
@@ -1230,6 +1255,37 @@ class LyricsController extends ChangeNotifier {
     ];
 
     return markers.any(message.contains);
+  }
+
+  bool _looksLikeAdOrAnnouncement({
+    required String title,
+    required String artist,
+  }) {
+    final normalized = '${title.trim()} ${artist.trim()}'.toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+
+    const adMarkers = <String>[
+      'anuncio',
+      'publicidad',
+      'advertisement',
+      'commercial break',
+      'sponsored',
+      'sponsor',
+      'promo',
+      'promocion',
+      'promoción',
+      'ad break',
+      'ads',
+    ];
+
+    if (adMarkers.any(normalized.contains)) {
+      return true;
+    }
+
+    final adWord = RegExp(r'(^|\s)ad(\s|$)', caseSensitive: false);
+    return adWord.hasMatch(normalized);
   }
 
   String _normalizeTitleForAutoSearch(String title) {
