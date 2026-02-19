@@ -1,12 +1,19 @@
 package net.iozamudioa.lyric_notifier
 
+import android.content.ContentValues
 import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
+import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity: FlutterActivity() {
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -157,6 +164,38 @@ class MainActivity: FlutterActivity() {
 						}
 					}.start()
 				}
+				"saveSnapshotImage" -> {
+					val bytes = call.argument<ByteArray>("bytes")
+					val fileName = call.argument<String>("fileName").orEmpty()
+					if (bytes == null || bytes.isEmpty()) {
+						result.success(false)
+						return@setMethodCallHandler
+					}
+
+					Thread {
+						val saved = saveSnapshotImage(bytes, fileName)
+						runOnUiThread {
+							result.success(saved)
+						}
+					}.start()
+				}
+				"shareSnapshotWithSaveOption" -> {
+					val bytes = call.argument<ByteArray>("bytes")
+					val fileName = call.argument<String>("fileName").orEmpty()
+					if (bytes == null || bytes.isEmpty()) {
+						result.success(false)
+						return@setMethodCallHandler
+					}
+
+					val launched = shareSnapshotWithSaveOption(
+						bytes = bytes,
+						fileName = fileName,
+					)
+					result.success(launched)
+				}
+				"consumeSnapshotSavedFeedback" -> {
+					result.success(SnapshotShareBridge.consumeSavedFeedback())
+				}
 				else -> result.notImplemented()
 			}
 		}
@@ -201,6 +240,88 @@ class MainActivity: FlutterActivity() {
 		}
 
 		return installed
+	}
+
+	private fun saveSnapshotImage(bytes: ByteArray, fileName: String): Boolean {
+		val safeName = if (fileName.isBlank()) {
+			"singsync_snapshot_${System.currentTimeMillis()}.png"
+		} else {
+			fileName
+		}
+
+		val resolver = contentResolver
+		val values = ContentValues().apply {
+			put(MediaStore.Images.Media.DISPLAY_NAME, safeName)
+			put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+				put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/SingSync")
+				put(MediaStore.Images.Media.IS_PENDING, 1)
+			}
+		}
+
+		val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+
+		return try {
+			resolver.openOutputStream(uri)?.use { stream ->
+				stream.write(bytes)
+			} ?: return false
+
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+				val completeValues = ContentValues().apply {
+					put(MediaStore.Images.Media.IS_PENDING, 0)
+				}
+				resolver.update(uri, completeValues, null, null)
+			}
+
+			true
+		} catch (_: Throwable) {
+			resolver.delete(uri, null, null)
+			false
+		}
+	}
+
+	private fun shareSnapshotWithSaveOption(
+		bytes: ByteArray,
+		fileName: String,
+	): Boolean {
+		val safeName = if (fileName.isBlank()) {
+			"singsync_snapshot_${System.currentTimeMillis()}.png"
+		} else {
+			fileName
+		}
+
+		return try {
+			val cacheFile = File(cacheDir, safeName)
+			cacheFile.outputStream().use { stream ->
+				stream.write(bytes)
+			}
+
+			val uri: Uri = FileProvider.getUriForFile(
+				this,
+				"$packageName.fileprovider",
+				cacheFile,
+			)
+
+			val shareIntent = Intent(Intent.ACTION_SEND).apply {
+				type = "image/png"
+				putExtra(Intent.EXTRA_STREAM, uri)
+				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+			}
+
+			val saveIntent = Intent(this, SnapshotSaveActivity::class.java).apply {
+				putExtra("filePath", cacheFile.absolutePath)
+				putExtra("fileName", safeName)
+			}
+
+			val chooser = Intent.createChooser(shareIntent, null).apply {
+				putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(saveIntent))
+			}
+
+			startActivity(chooser)
+			true
+		} catch (_: Throwable) {
+			false
+		}
 	}
 
 	companion object {

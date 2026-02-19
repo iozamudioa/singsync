@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
+import '../../../l10n/app_localizations.dart';
 
 import '../data/local_song_cache_repository.dart';
 import '../data/platform_lyrics_gateway.dart';
@@ -16,7 +19,13 @@ class LyricsController extends ChangeNotifier {
     required LocalSongCacheRepository songCache,
   })  : _gateway = gateway,
       _metadataSearchPort = metadataSearchPort,
-      _songCache = songCache;
+      _songCache = songCache {
+    final l10n = _l10n;
+    songTitle = l10n.nowPlayingDefaultTitle;
+    artistName = l10n.motivationStartPlayback;
+    nowPlayingLyrics = l10n.permissionMissingMessage;
+    searchLyrics = l10n.searchLyricsDefaultPrompt;
+  }
 
   final PlatformLyricsGateway _gateway;
   final MusicMetadataSearchPort _metadataSearchPort;
@@ -25,14 +34,18 @@ class LyricsController extends ChangeNotifier {
   Timer? _playbackPollTimer;
   bool _disposed = false;
 
-  static const String _notFoundMessage = 'No se encontró letra para esta canción en lrclib.';
-  static const String _permissionMissingMessage =
-      'Activa el acceso a notificaciones para esta app y reproduce una canción para cargar su letra.';
-  static const String _waitingPlaybackMessage =
-      'Permiso activo. Comienza a reproducir una canción para detectar el now playing y cargar la letra.';
-  static const String _adDetectedMessage =
-      'Anuncio detectado. Esperando el siguiente cambio de canción...';
-    static const String _tuningLyricsMessage = 'Sintonizando letra ...';
+  AppLocalizations get _l10n => lookupAppLocalizations(_effectiveLocale());
+
+  Locale _effectiveLocale() {
+    final languageCode = ui.PlatformDispatcher.instance.locale.languageCode.toLowerCase();
+    return languageCode == 'es' ? const Locale('es') : const Locale('en');
+  }
+
+  String get _notFoundMessage => _l10n.notFoundMessage;
+  String get _permissionMissingMessage => _l10n.permissionMissingMessage;
+  String get _waitingPlaybackMessage => _l10n.waitingPlaybackMessage;
+  String get _adDetectedMessage => _l10n.adDetectedMessage;
+  String get _tuningLyricsMessage => _l10n.tuningLyricsMessage;
   static const int _autoRetryAttempts = 5;
   static const Duration _autoRetryDelay = Duration(seconds: 2);
   static const List<String> knownMediaAppPackages = <String>[
@@ -43,13 +56,12 @@ class LyricsController extends ChangeNotifier {
   ];
 
   String songTitle = 'Now Playing';
-  String artistName = 'Esperando notificación de Android System Intelligence';
+  String artistName = '';
   String nowPlayingSourceType = '';
   String? nowPlayingSourcePackage;
   String? preferredMediaAppPackage;
   Set<String> installedMediaAppPackages = const <String>{};
-  String nowPlayingLyrics =
-      _permissionMissingMessage;
+  String nowPlayingLyrics = '';
   String? nowPlayingArtworkUrl;
   bool hasNotificationListenerAccess = false;
   bool isLoadingNowPlayingLyrics = false;
@@ -63,7 +75,7 @@ class LyricsController extends ChangeNotifier {
   int _nowPlayingRequestId = 0;
 
   String searchQuery = '';
-  String searchLyrics = 'Escribe lo que quieras buscar para encontrar una letra.';
+  String searchLyrics = '';
   String? searchArtworkUrl;
   List<LyricsCandidate> searchCandidates = const [];
   LyricsCandidate? _selectedSearchCandidate;
@@ -85,7 +97,7 @@ class LyricsController extends ChangeNotifier {
     _subscription = _gateway.nowPlayingStream().listen(
       onNowPlayingEvent,
       onError: (Object error) {
-        artistName = 'Error escuchando notificaciones';
+        artistName = _l10n.listeningErrorArtist;
         nowPlayingLyrics = '$error';
         _notifySafely();
       },
@@ -117,7 +129,7 @@ class LyricsController extends ChangeNotifier {
     if (hasActiveNowPlaying &&
       nowTitle.isNotEmpty &&
       nowArtist.isNotEmpty &&
-      nowTitle != 'Now Playing') {
+      nowTitle != _l10n.nowPlayingDefaultTitle) {
       final requestId = ++_nowPlayingRequestId;
       isLoadingNowPlayingLyrics = true;
       nowPlayingLyrics = _tuningLyricsMessage;
@@ -149,7 +161,7 @@ class LyricsController extends ChangeNotifier {
     }
 
     isSearchingLyrics = true;
-    searchLyrics = 'Actualizando letra en lrclib...';
+    searchLyrics = _l10n.updatingLyrics;
     _resetSearchCandidates();
     _notifySafely();
 
@@ -164,8 +176,8 @@ class LyricsController extends ChangeNotifier {
     isViewingSearchChosenCandidate = false;
     isManualSearchFormVisible = candidates.isEmpty;
     searchLyrics = candidates.isNotEmpty
-        ? 'Selecciona una coincidencia para mostrar la letra.'
-        : 'No se encontraron coincidencias en /api/search.';
+      ? _l10n.selectMatchToShowLyrics
+      : _l10n.noMatchesApiSearch;
     _notifySafely();
   }
 
@@ -245,8 +257,8 @@ class LyricsController extends ChangeNotifier {
     isAdLikeNowPlaying = false;
     nowPlayingSourceType = '';
     nowPlayingSourcePackage = null;
-    songTitle = 'Now Playing';
-    artistName = 'Esperando notificación de Android System Intelligence';
+    songTitle = _l10n.nowPlayingDefaultTitle;
+    artistName = _l10n.motivationStartPlayback;
     nowPlayingArtworkUrl = null;
     isManualSearchMode = false;
     isManualSearchFormVisible = false;
@@ -278,7 +290,7 @@ class LyricsController extends ChangeNotifier {
   void prefillManualSearchFromNowPlaying() {
     final title = songTitle.trim();
 
-    if (title.isEmpty || title == 'Now Playing') {
+    if (title.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
       return;
     }
 
@@ -299,14 +311,14 @@ class LyricsController extends ChangeNotifier {
     isSearchingLyrics = false;
     searchArtworkUrl = nowPlayingArtworkUrl;
     _resetSearchCandidates();
-    searchLyrics = 'Escribe una búsqueda manual para ver coincidencias.';
+    searchLyrics = _l10n.manualSearchPrompt;
     _notifySafely();
   }
 
   Future<bool> _retryNowPlayingLyricsBeforeManualSearch() async {
     final title = songTitle.trim();
     final artist = artistName.trim();
-    if (title.isEmpty || artist.isEmpty || title == 'Now Playing') {
+    if (title.isEmpty || artist.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
       return false;
     }
 
@@ -395,15 +407,18 @@ class LyricsController extends ChangeNotifier {
       return false;
     }
 
-    final hasSong = songTitle.trim().isNotEmpty && songTitle.trim() != 'Now Playing';
+    final hasSong =
+      songTitle.trim().isNotEmpty && songTitle.trim() != _l10n.nowPlayingDefaultTitle;
     if (!hasSong) {
       return false;
     }
 
     final message = nowPlayingLyrics.trim().toLowerCase();
     final notFoundLike = message.contains('no se encontró letra') ||
-        message.contains('no se encontro letra') ||
-        message.contains('no fue posible consultar');
+      message.contains('no se encontro letra') ||
+      message.contains('no fue posible consultar') ||
+      message.contains('no lyrics were found') ||
+      message.contains('could not query');
 
     return notFoundLike || _isRetryableMessage(nowPlayingLyrics);
   }
@@ -414,7 +429,7 @@ class LyricsController extends ChangeNotifier {
     final selectedPackage = preferredMediaAppPackage;
     final hasDetectedSong = hasActiveNowPlaying &&
         songTitle.trim().isNotEmpty &&
-        songTitle.trim() != 'Now Playing';
+      songTitle.trim() != _l10n.nowPlayingDefaultTitle;
     final shouldSearchInSelected = hasDetectedSong && nowPlayingSourceType == 'pixel_now_playing';
     final query = shouldSearchInSelected
         ? '${songTitle.trim()} ${artistName.trim()}'.trim()
@@ -613,7 +628,6 @@ class LyricsController extends ChangeNotifier {
       preferSynced: preferSynced,
     );
 
-    final cachedLyrics = cachedSong == null ? '' : _sanitizeLyricsText(cachedSong.lyrics);
     final shouldForceSyncedLookup =
         sourceType == 'media_player' &&
         cachedVariantLyrics.isNotEmpty &&
@@ -674,9 +688,9 @@ class LyricsController extends ChangeNotifier {
     required String artist,
     required bool preferSynced,
   }) async {
-    var lastResult = const LyricsLookupResult(
+    var lastResult = LyricsLookupResult(
       lyrics: _notFoundMessage,
-      debugSteps: [],
+      debugSteps: const [],
     );
 
     for (var attempt = 1; attempt <= _autoRetryAttempts; attempt++) {
@@ -720,7 +734,10 @@ class LyricsController extends ChangeNotifier {
     required String sourceType,
     required String? artworkFromEvent,
   }) async {
-    if (artworkFromEvent != null && artworkFromEvent.trim().isNotEmpty) {
+    final hasEventArtwork = artworkFromEvent != null && artworkFromEvent.trim().isNotEmpty;
+    final shouldAlwaysSearchArtwork = sourceType == 'pixel_now_playing';
+
+    if (hasEventArtwork && !shouldAlwaysSearchArtwork) {
       if (_disposed || requestId != _nowPlayingRequestId) {
         return;
       }
@@ -840,7 +857,7 @@ class LyricsController extends ChangeNotifier {
     final query = searchQuery.trim();
 
     if (query.isEmpty) {
-      searchLyrics = 'Completa el campo de búsqueda para continuar.';
+      searchLyrics = _l10n.completeSearchField;
       _notifySafely();
       return;
     }
@@ -848,7 +865,7 @@ class LyricsController extends ChangeNotifier {
     isSearchingLyrics = true;
     isManualSearchMode = true;
     isManualSearchFormVisible = false;
-    searchLyrics = 'Buscando coincidencias en lrclib...';
+    searchLyrics = _l10n.searchingMatches;
     searchArtworkUrl = null;
     _resetSearchCandidates();
     _notifySafely();
@@ -865,8 +882,8 @@ class LyricsController extends ChangeNotifier {
       isViewingSearchChosenCandidate = false;
         isManualSearchFormVisible = candidates.isEmpty;
       searchLyrics = candidates.isNotEmpty
-          ? 'Selecciona una coincidencia para mostrar la letra.'
-          : 'No se encontraron coincidencias en /api/search.';
+          ? _l10n.selectMatchToShowLyrics
+          : _l10n.noMatchesApiSearch;
       _notifySafely();
     } catch (_) {
       if (_disposed) {
@@ -874,7 +891,7 @@ class LyricsController extends ChangeNotifier {
       }
 
       isSearchingLyrics = false;
-      searchLyrics = 'No fue posible consultar /api/search en este momento.';
+      searchLyrics = _l10n.apiSearchUnavailable;
       _notifySafely();
     }
   }
@@ -904,7 +921,7 @@ class LyricsController extends ChangeNotifier {
   bool get canAssociateSelectedSearchLyrics {
     final title = songTitle.trim();
     final artist = artistName.trim();
-    if (title.isEmpty || artist.isEmpty || title == 'Now Playing') {
+    if (title.isEmpty || artist.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
       return false;
     }
     if (!isViewingSearchChosenCandidate || _selectedSearchCandidate == null) {
@@ -920,7 +937,7 @@ class LyricsController extends ChangeNotifier {
 
     final title = songTitle.trim();
     final artist = artistName.trim();
-    if (title.isEmpty || artist.isEmpty || title == 'Now Playing') {
+    if (title.isEmpty || artist.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
       return;
     }
 
@@ -974,7 +991,7 @@ class LyricsController extends ChangeNotifier {
     }
 
     isSearchingLyrics = true;
-    searchLyrics = 'Reintentando coincidencias en lrclib...';
+    searchLyrics = _l10n.retryingMatches;
     _resetSearchCandidates();
     _notifySafely();
 
@@ -989,8 +1006,8 @@ class LyricsController extends ChangeNotifier {
       isChoosingSearchCandidate = candidates.isNotEmpty;
       isViewingSearchChosenCandidate = false;
       searchLyrics = candidates.isNotEmpty
-          ? 'Selecciona una coincidencia para mostrar la letra.'
-          : 'No se encontraron coincidencias en /api/search.';
+          ? _l10n.selectMatchToShowLyrics
+          : _l10n.noMatchesApiSearch;
       _notifySafely();
     } catch (_) {
       if (_disposed) {
@@ -998,7 +1015,7 @@ class LyricsController extends ChangeNotifier {
       }
 
       isSearchingLyrics = false;
-      searchLyrics = 'No fue posible consultar /api/search en este momento.';
+      searchLyrics = _l10n.apiSearchUnavailable;
       _notifySafely();
     }
   }
@@ -1019,7 +1036,7 @@ class LyricsController extends ChangeNotifier {
     isChoosingSearchCandidate = true;
     isViewingSearchChosenCandidate = false;
     _selectedSearchCandidate = null;
-    searchLyrics = 'Selecciona una coincidencia para mostrar la letra.';
+    searchLyrics = _l10n.selectMatchToShowLyrics;
     _notifySafely();
   }
 
@@ -1080,15 +1097,15 @@ class LyricsController extends ChangeNotifier {
       }
     } catch (error) {
       debugPrint('[LRCLIB] exception=$error');
-      return const LyricsLookupResult(
-        lyrics: 'No fue posible consultar lrclib en este momento.',
-        debugSteps: [],
+      return LyricsLookupResult(
+        lyrics: _l10n.lrclibUnavailable,
+        debugSteps: const [],
       );
     }
 
-    return const LyricsLookupResult(
-      lyrics: 'No se encontró letra para esta canción en lrclib.',
-      debugSteps: [],
+    return LyricsLookupResult(
+      lyrics: _l10n.notFoundMessage,
+      debugSteps: const [],
     );
   }
 
@@ -1160,8 +1177,7 @@ class LyricsController extends ChangeNotifier {
 
   bool _isRetryableMessage(String message) {
     final normalized = _sanitizeLyricsText(message);
-    return normalized == 'No fue posible consultar lrclib en este momento.' ||
-        normalized == _notFoundMessage;
+    return normalized == _l10n.lrclibUnavailable || normalized == _notFoundMessage;
   }
 
   bool _isCacheableLyrics(String lyrics) {
@@ -1228,7 +1244,7 @@ class LyricsController extends ChangeNotifier {
       return true;
     }
 
-    const markers = <String>[
+    final markers = <String>[
       'activa el acceso a notificaciones',
       'esperando notificación',
       'permiso activo. comienza a reproducir una canción',
@@ -1252,6 +1268,28 @@ class LyricsController extends ChangeNotifier {
       'selecciona una coincidencia para mostrar la letra',
       'no se encontraron coincidencias en /api/search',
       'no fue posible consultar /api/search en este momento',
+      'enable notification access',
+      'permission active',
+      'ad detected',
+      'updating lyrics on lrclib',
+      'retrying matches on lrclib',
+      'select a match to show lyrics',
+      'no matches found in /api/search',
+      'could not query /api/search right now',
+      'could not query lrclib right now',
+      _l10n.permissionMissingMessage.toLowerCase(),
+      _l10n.waitingPlaybackMessage.toLowerCase(),
+      _l10n.adDetectedMessage.toLowerCase(),
+      _l10n.searchLyricsDefaultPrompt.toLowerCase(),
+      _l10n.manualSearchPrompt.toLowerCase(),
+      _l10n.completeSearchField.toLowerCase(),
+      _l10n.searchingMatches.toLowerCase(),
+      _l10n.retryingMatches.toLowerCase(),
+      _l10n.selectMatchToShowLyrics.toLowerCase(),
+      _l10n.noMatchesApiSearch.toLowerCase(),
+      _l10n.apiSearchUnavailable.toLowerCase(),
+      _l10n.lrclibUnavailable.toLowerCase(),
+      _l10n.notFoundMessage.toLowerCase(),
     ];
 
     return markers.any(message.contains);

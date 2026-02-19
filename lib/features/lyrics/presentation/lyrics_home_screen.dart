@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../app/theme_controller.dart';
+import '../../../l10n/app_localizations.dart';
 import 'lyrics_controller.dart';
 import 'widgets/home_header.dart';
 import 'widgets/now_playing_tab.dart';
@@ -23,8 +25,10 @@ class LyricsHomeScreen extends StatefulWidget {
 }
 
 class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBindingObserver {
+  static const String _useArtworkBackgroundPrefKey = 'use_artwork_background';
   bool _isPermissionDialogOpen = false;
   bool _hideHomeHeaderForExpandedVinyl = false;
+  bool _useArtworkBackground = true;
   bool? _lastWakeLockDesired;
 
   void _syncWakeLockWithPlayback({required bool shouldKeepAwake}) {
@@ -42,6 +46,32 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     setState(() {
       _hideHomeHeaderForExpandedVinyl = isExpandedLandscapeMode;
     });
+  }
+
+  void _handleUseArtworkBackgroundChanged(bool enabled) {
+    if (_useArtworkBackground == enabled) {
+      return;
+    }
+    setState(() {
+      _useArtworkBackground = enabled;
+    });
+    unawaited(_persistUseArtworkBackground(enabled));
+  }
+
+  Future<void> _loadAppearancePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedValue = prefs.getBool(_useArtworkBackgroundPrefKey);
+    if (!mounted || savedValue == null || savedValue == _useArtworkBackground) {
+      return;
+    }
+    setState(() {
+      _useArtworkBackground = savedValue;
+    });
+  }
+
+  Future<void> _persistUseArtworkBackground(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_useArtworkBackgroundPrefKey, enabled);
   }
 
   void _schedulePermissionCheck({Duration delay = const Duration(milliseconds: 350)}) {
@@ -71,10 +101,11 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       enableDrag: true,
       showDragHandle: true,
       backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.28),
+      barrierColor: Colors.black.withValues(alpha: 0.28),
       constraints: const BoxConstraints(maxWidth: double.infinity),
       builder: (context) {
         final theme = Theme.of(context);
+        final l10n = AppLocalizations.of(context);
         return BackdropFilter(
           filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
           child: SafeArea(
@@ -105,7 +136,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                         child: IgnorePointer(
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.surface.withOpacity(0.84),
+                              color: theme.colorScheme.surface.withValues(alpha: 0.84),
                             ),
                           ),
                         ),
@@ -138,7 +169,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              artist.isEmpty ? 'Artista' : artist,
+                              artist.isEmpty ? l10n.artistLabel : artist,
                               style: theme.textTheme.titleLarge?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
@@ -175,7 +206,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
 
                                 if (genre.isEmpty && country.isEmpty && shortBio.isEmpty) {
                                   return Text(
-                                    'No hay más datos del artista por ahora.',
+                                    l10n.noArtistDataYet,
                                     style: theme.textTheme.bodyMedium?.copyWith(
                                       color: theme.colorScheme.onSurfaceVariant,
                                     ),
@@ -188,14 +219,14 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                                   children: [
                                     if (genre.isNotEmpty)
                                       Text(
-                                        'Género: $genre',
+                                        l10n.genreLabel(genre),
                                         style: theme.textTheme.bodyLarge,
                                         textAlign: TextAlign.center,
                                       ),
                                     if (country.isNotEmpty) ...[
                                       const SizedBox(height: 6),
                                       Text(
-                                        'País: $country',
+                                        l10n.countryLabel(country),
                                         style: theme.textTheme.bodyLarge,
                                         textAlign: TextAlign.center,
                                       ),
@@ -203,7 +234,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                                     if (shortBio.isNotEmpty) ...[
                                       const SizedBox(height: 14),
                                       Text(
-                                        'Historia breve',
+                                        l10n.shortBioTitle,
                                         style: theme.textTheme.titleMedium?.copyWith(
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -238,6 +269,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadAppearancePreferences());
     _syncWakeLockWithPlayback(
       shouldKeepAwake: widget.controller.isNowPlayingPlaybackActive,
     );
@@ -283,22 +315,21 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       await showDialog<void>(
         context: context,
         builder: (context) {
+          final l10n = AppLocalizations.of(context);
           return AlertDialog(
-            title: const Text('Permiso necesario'),
-            content: const Text(
-              'SingSync necesita acceso a notificaciones para detectar la canción actual y buscar su letra automáticamente.',
-            ),
+            title: Text(l10n.permissionNeededTitle),
+            content: Text(l10n.permissionDialogMessage),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Ahora no'),
+                child: Text(l10n.notNow),
               ),
               FilledButton(
                 onPressed: () async {
                   Navigator.of(context).pop();
                   await _openPermissionSettings();
                 },
-                child: const Text('Ir a permisos'),
+                child: Text(l10n.goToPermissions),
               ),
             ],
           );
@@ -315,6 +346,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       animation: Listenable.merge([widget.themeController, widget.controller]),
       builder: (context, _) {
         final theme = Theme.of(context);
+        final l10n = AppLocalizations.of(context);
         final artworkUrl = widget.controller.nowPlayingArtworkUrl;
         _syncWakeLockWithPlayback(
           shouldKeepAwake: widget.controller.isNowPlayingPlaybackActive,
@@ -323,7 +355,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         return Scaffold(
           body: Stack(
             children: [
-              if ((artworkUrl ?? '').isNotEmpty)
+              if (_useArtworkBackground && (artworkUrl ?? '').isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Stack(
@@ -346,11 +378,21 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                         Positioned.fill(
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.surface.withOpacity(0.58),
+                              color: theme.colorScheme.surface.withValues(alpha: 0.58),
                             ),
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              if (!_useArtworkBackground)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                      ),
                     ),
                   ),
                 ),
@@ -367,6 +409,8 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                           artistName: widget.controller.artistName,
                           isDarkMode: widget.themeController.isDarkMode,
                           onToggleTheme: widget.themeController.toggleTheme,
+                          useArtworkBackground: _useArtworkBackground,
+                          onUseArtworkBackgroundChanged: _handleUseArtworkBackgroundChanged,
                           onHeaderTap: _showArtistInfoModal,
                         ),
                       if (!widget.controller.hasNotificationListenerAccess) ...[
@@ -383,14 +427,14 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
-                                    'Activa acceso a notificaciones para detectar canciones.',
+                                    l10n.enableNotificationsCard,
                                     style: theme.textTheme.bodyMedium,
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 FilledButton(
                                   onPressed: _openPermissionSettings,
-                                  child: const Text('Permitir'),
+                                  child: Text(l10n.allow),
                                 ),
                               ],
                             ),
@@ -402,6 +446,8 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                         child: NowPlayingTab(
                           controller: widget.controller,
                           theme: theme,
+                          isDarkMode: widget.themeController.isDarkMode,
+                          onToggleTheme: widget.themeController.toggleTheme,
                           onSearchManually: widget.controller.startManualCandidatesFromNowPlaying,
                           onExpandedLandscapeModeChanged: _handleExpandedLandscapeModeChanged,
                         ),

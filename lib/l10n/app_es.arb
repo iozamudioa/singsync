@@ -1,0 +1,94 @@
+{
+  "@@locale": "es",
+  "appTitle": "Lyric Notifier",
+  "nowPlayingDefaultTitle": "Now Playing",
+  "unknownArtist": "Artista desconocido",
+  "artistLabel": "Artista",
+  "motivationStartPlayback": "Pon tu canción favorita y empezamos 🎵",
+  "permissionNeededTitle": "Permiso necesario",
+  "permissionDialogMessage": "SingSync necesita acceso a notificaciones para detectar la canción actual y buscar su letra automáticamente.",
+  "notNow": "Ahora no",
+  "goToPermissions": "Ir a permisos",
+  "enableNotificationsCard": "Activa acceso a notificaciones para detectar canciones.",
+  "allow": "Permitir",
+  "close": "Cerrar",
+  "developerBy": "Developer by: iozamudioa",
+  "githubLabel": "Github:",
+  "versionLabel": "Version: {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "poweredByLrclib": "Powered by: LRCLIB",
+  "useArtworkBackground": "Usar carátula como fondo",
+  "useSolidBackgroundDescription": "Si se desactiva, se usa fondo sólido según el tema.",
+  "infoTooltip": "Información",
+  "switchToLightMode": "Cambiar a modo claro",
+  "switchToDarkMode": "Cambiar a modo oscuro",
+  "openActivePlayer": "Abrir reproductor activo",
+  "previous": "Anterior",
+  "playPause": "Play/Pause",
+  "next": "Siguiente",
+  "searchManually": "Buscar manualmente",
+  "noArtistDataYet": "No hay más datos del artista por ahora.",
+  "genreLabel": "Género: {genre}",
+  "@genreLabel": {
+    "placeholders": {
+      "genre": {}
+    }
+  },
+  "countryLabel": "País: {country}",
+  "@countryLabel": {
+    "placeholders": {
+      "country": {}
+    }
+  },
+  "detectedPeriod": "Periodo detectado: {firstYear} - {latestYear}",
+  "@detectedPeriod": {
+    "placeholders": {
+      "firstYear": {},
+      "latestYear": {}
+    }
+  },
+  "shortBioTitle": "Historia breve",
+  "popularReleases": "Lanzamientos populares",
+  "back": "Regresar",
+  "editSearch": "Editar búsqueda",
+  "backToMatches": "Regresar a coincidencias",
+  "manualSearchTitle": "Búsqueda manual",
+  "manualSearchDescription": "Escribe una consulta para buscar coincidencias en lrclib.",
+  "searchQueryLabel": "Buscar (query)",
+  "searchQueryHint": "Ej. clandestino shakira",
+  "searchLyrics": "Buscar letra",
+  "noMatchesToChoose": "No se encontraron coincidencias para elegir.",
+  "copy": "Copiar",
+  "share": "Compartir",
+  "associateToSong": "Asociar a canción",
+  "shareSnapshot": "Capturar y compartir",
+  "snapshotReady": "Imagen lista para compartir",
+  "snapshotError": "No se pudo generar la imagen",
+  "snapshotActiveLine": "Línea activa",
+  "snapshotVisibleVerse": "Verso visible",
+  "snapshotNoLyrics": "Sin letra disponible",
+  "snapshotGeneratedWithBrand": "Generado con SingSync",
+  "lyricsCopied": "Letra copiada",
+  "lyricsAssociated": "Letra asociada a la canción",
+  "lyricsNotAssociated": "No se pudo asociar la letra",
+  "permissionMissingMessage": "Activa el acceso a notificaciones para esta app y reproduce una canción para cargar su letra.",
+  "waitingPlaybackMessage": "Permiso activo. Comienza a reproducir una canción para detectar el now playing y cargar la letra.",
+  "adDetectedMessage": "Anuncio detectado. Esperando el siguiente cambio de canción...",
+  "tuningLyricsMessage": "Sintonizando letra ...",
+  "notFoundMessage": "No se encontró letra para esta canción en lrclib.",
+  "searchLyricsDefaultPrompt": "Escribe lo que quieras buscar para encontrar una letra.",
+  "listeningErrorArtist": "Error escuchando notificaciones",
+  "updatingLyrics": "Actualizando letra en lrclib...",
+  "selectMatchToShowLyrics": "Selecciona una coincidencia para mostrar la letra.",
+  "noMatchesApiSearch": "No se encontraron coincidencias en /api/search.",
+  "manualSearchPrompt": "Escribe una búsqueda manual para ver coincidencias.",
+  "completeSearchField": "Completa el campo de búsqueda para continuar.",
+  "searchingMatches": "Buscando coincidencias en lrclib...",
+  "apiSearchUnavailable": "No fue posible consultar /api/search en este momento.",
+  "retryingMatches": "Reintentando coincidencias en lrclib...",
+  "lrclibUnavailable": "No fue posible consultar lrclib en este momento."
+}

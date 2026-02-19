@@ -1,0 +1,94 @@
+{
+  "@@locale": "en",
+  "appTitle": "Lyric Notifier",
+  "nowPlayingDefaultTitle": "Now Playing",
+  "unknownArtist": "Unknown artist",
+  "artistLabel": "Artist",
+  "motivationStartPlayback": "Play your favorite song and let’s start 🎵",
+  "permissionNeededTitle": "Permission required",
+  "permissionDialogMessage": "SingSync needs notification access to detect the current song and automatically fetch lyrics.",
+  "notNow": "Not now",
+  "goToPermissions": "Go to permissions",
+  "enableNotificationsCard": "Enable notification access to detect songs.",
+  "allow": "Allow",
+  "close": "Close",
+  "developerBy": "Developer by: iozamudioa",
+  "githubLabel": "Github:",
+  "versionLabel": "Version: {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "poweredByLrclib": "Powered by: LRCLIB",
+  "useArtworkBackground": "Use artwork as background",
+  "useSolidBackgroundDescription": "If disabled, a solid background based on theme is used.",
+  "infoTooltip": "Information",
+  "switchToLightMode": "Switch to light mode",
+  "switchToDarkMode": "Switch to dark mode",
+  "openActivePlayer": "Open active player",
+  "previous": "Previous",
+  "playPause": "Play/Pause",
+  "next": "Next",
+  "searchManually": "Search manually",
+  "noArtistDataYet": "No more artist data available right now.",
+  "genreLabel": "Genre: {genre}",
+  "@genreLabel": {
+    "placeholders": {
+      "genre": {}
+    }
+  },
+  "countryLabel": "Country: {country}",
+  "@countryLabel": {
+    "placeholders": {
+      "country": {}
+    }
+  },
+  "detectedPeriod": "Detected period: {firstYear} - {latestYear}",
+  "@detectedPeriod": {
+    "placeholders": {
+      "firstYear": {},
+      "latestYear": {}
+    }
+  },
+  "shortBioTitle": "Short bio",
+  "popularReleases": "Popular releases",
+  "back": "Back",
+  "editSearch": "Edit search",
+  "backToMatches": "Back to matches",
+  "manualSearchTitle": "Manual search",
+  "manualSearchDescription": "Type a query to search matches on lrclib.",
+  "searchQueryLabel": "Search (query)",
+  "searchQueryHint": "e.g. clandestino shakira",
+  "searchLyrics": "Search lyrics",
+  "noMatchesToChoose": "No matches found to choose from.",
+  "copy": "Copy",
+  "share": "Share",
+  "associateToSong": "Associate to song",
+  "shareSnapshot": "Capture and share",
+  "snapshotReady": "Image ready to share",
+  "snapshotError": "Could not generate image",
+  "snapshotActiveLine": "Active line",
+  "snapshotVisibleVerse": "Visible verse",
+  "snapshotNoLyrics": "No lyrics available",
+  "snapshotGeneratedWithBrand": "Generated with SingSync",
+  "lyricsCopied": "Lyrics copied",
+  "lyricsAssociated": "Lyrics associated to song",
+  "lyricsNotAssociated": "Could not associate lyrics",
+  "permissionMissingMessage": "Enable notification access for this app and play a song to load lyrics.",
+  "waitingPlaybackMessage": "Permission active. Start playing a song to detect now playing and load lyrics.",
+  "adDetectedMessage": "Ad detected. Waiting for the next song change...",
+  "tuningLyricsMessage": "Tuning lyrics ...",
+  "notFoundMessage": "No lyrics were found for this song on lrclib.",
+  "searchLyricsDefaultPrompt": "Type anything you want to search for lyrics.",
+  "listeningErrorArtist": "Error listening to notifications",
+  "updatingLyrics": "Updating lyrics on lrclib...",
+  "selectMatchToShowLyrics": "Select a match to show lyrics.",
+  "noMatchesApiSearch": "No matches found in /api/search.",
+  "manualSearchPrompt": "Type a manual search to see matches.",
+  "completeSearchField": "Complete the search field to continue.",
+  "searchingMatches": "Searching matches on lrclib...",
+  "apiSearchUnavailable": "Could not query /api/search right now.",
+  "retryingMatches": "Retrying matches on lrclib...",
+  "lrclibUnavailable": "Could not query lrclib right now."
+}

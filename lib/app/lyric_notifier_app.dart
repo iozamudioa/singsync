@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../features/lyrics/data/local_song_cache_repository.dart';
 import '../features/lyrics/data/platform_lyrics_gateway.dart';
 import '../features/lyrics/data/platform_music_metadata_search_adapter.dart';
 import '../features/lyrics/presentation/lyrics_controller.dart';
 import '../features/lyrics/presentation/lyrics_home_screen.dart';
+import '../l10n/app_localizations.dart';
 import 'theme_controller.dart';
 
 class LyricNotifierApp extends StatefulWidget {
@@ -44,7 +46,17 @@ class _LyricNotifierAppState extends State<LyricNotifierApp> {
       animation: _themeController,
       builder: (context, _) {
         return MaterialApp(
-          title: 'Lyric Notifier',
+          onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
+          localizationsDelegates: const [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [
+            Locale('es'),
+            Locale('en'),
+          ],
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
             useMaterial3: true,
