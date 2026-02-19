@@ -39,8 +39,6 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _buildActivePlayerButton(iconSize: iconSize - 2),
-            const SizedBox(height: 10),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -66,15 +64,8 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            IconButton(
-              onPressed: widget.onToggleTheme,
-              icon: Icon(
-                widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              ),
-              iconSize: iconSize - 2,
-              tooltip: widget.isDarkMode ? l10n.switchToLightMode : l10n.switchToDarkMode,
-            ),
+            const SizedBox(height: 10),
+            _buildActivePlayerButton(iconSize: iconSize - 2),
           ],
         );
       }
@@ -86,15 +77,6 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _buildPlatformButtonsRow(artistOnly: false),
-            const SizedBox(height: 8),
-            IconButton(
-              onPressed: widget.onToggleTheme,
-              icon: Icon(
-                widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              ),
-              iconSize: iconSize,
-              tooltip: widget.isDarkMode ? l10n.switchToLightMode : l10n.switchToDarkMode,
-            ),
             if (controller.canShowManualSearchButton) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -242,6 +224,17 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                             ),
                           ),
                         ),
+                        if (isLandscape)
+                          Positioned(
+                            right: 16,
+                            bottom: 16,
+                            child: IconButton(
+                              style: _snapshotActionButtonStyle(theme),
+                              onPressed: _shareBasicSnapshotFromExpanded,
+                              tooltip: l10n.shareSnapshot,
+                              icon: const Icon(Icons.photo_camera_outlined),
+                            ),
+                          ),
                       ],
                     ),
                   );

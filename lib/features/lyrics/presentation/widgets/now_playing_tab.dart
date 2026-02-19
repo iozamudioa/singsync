@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../l10n/app_localizations.dart';
@@ -68,10 +73,14 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
   static const double _dragSeekMsPerTurn = 45000;
   static const int _dragSeekDispatchIntervalMs = 120;
   static const int _dragSeekMinPositionDeltaMs = 500;
+  static const MethodChannel _lyricsMethodsChannel = MethodChannel(
+    'net.iozamudioa.lyric_notifier/lyrics',
+  );
   Timer? _autoExpandVinylTimer;
   String? _autoExpandPendingKey;
   String? _autoExpandedForKey;
   bool? _lastExpandedLandscapeModeReported;
+  bool _isBasicSnapshotBusy = false;
 
   @override
   void initState() {
@@ -292,6 +301,357 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     setState(() {
       _isVinylExpanded = !_isVinylExpanded;
     });
+  }
+
+  Future<void> _shareBasicSnapshotFromExpanded() async {
+    if (_isBasicSnapshotBusy) {
+      return;
+    }
+
+    _isBasicSnapshotBusy = true;
+    final l10n = AppLocalizations.of(context);
+    try {
+      final pngBytes = await _buildBasicSnapshotPng();
+      if (!mounted) {
+        _isBasicSnapshotBusy = false;
+        return;
+      }
+
+      if (pngBytes == null || pngBytes.isEmpty) {
+        _showFeedback(l10n.snapshotError);
+        _isBasicSnapshotBusy = false;
+        return;
+      }
+
+      if (Platform.isAndroid) {
+        final shared = await _shareSnapshotViaAndroidChooser(pngBytes);
+        if (!mounted) {
+          _isBasicSnapshotBusy = false;
+          return;
+        }
+        if (!shared) {
+          _showFeedback(l10n.snapshotError);
+        }
+      } else {
+        final tempDir = await getTemporaryDirectory();
+        final file = File(
+          '${tempDir.path}${Platform.pathSeparator}singsync_snapshot_basic_${DateTime.now().millisecondsSinceEpoch}.png',
+        );
+        await file.writeAsBytes(pngBytes, flush: true);
+        await Share.shareXFiles([XFile(file.path)]);
+      }
+    } catch (_) {
+      if (mounted) {
+        _showFeedback(l10n.snapshotError);
+      }
+    } finally {
+      _isBasicSnapshotBusy = false;
+    }
+  }
+
+  Future<bool> _shareSnapshotViaAndroidChooser(Uint8List pngBytes) async {
+    final launched = await _lyricsMethodsChannel.invokeMethod<dynamic>(
+      'shareSnapshotWithSaveOption',
+      {
+        'bytes': pngBytes,
+        'fileName': 'singsync_snapshot_basic_${DateTime.now().millisecondsSinceEpoch}.png',
+      },
+    );
+    return launched == true;
+  }
+
+  void _showFeedback(String message) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(milliseconds: 1400),
+        content: Text(message, textAlign: TextAlign.center),
+      ),
+    );
+  }
+
+  ButtonStyle _snapshotActionButtonStyle(ThemeData theme) {
+    return IconButton.styleFrom(
+      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.32),
+      foregroundColor: theme.colorScheme.onSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  Future<Uint8List?> _buildBasicSnapshotPng() async {
+    final l10n = AppLocalizations.of(context);
+    final theme = widget.theme;
+    const baseWidth = 1080.0;
+    const baseHeight = 1350.0;
+    const exportScale = 2.0;
+    final exportWidth = (baseWidth * exportScale).round();
+    final exportHeight = (baseHeight * exportScale).round();
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(
+      recorder,
+      Rect.fromLTWH(0, 0, exportWidth.toDouble(), exportHeight.toDouble()),
+    );
+    canvas.scale(exportScale, exportScale);
+
+    final artworkImage = await _loadBasicSnapshotArtworkImage();
+    final dominantArtworkColor = await _extractDominantArtworkColor(artworkImage);
+    final gradientStartColor = dominantArtworkColor == null
+        ? theme.colorScheme.surface
+        : Color.lerp(theme.colorScheme.surface, dominantArtworkColor, 0.18)!;
+    final gradientEndColor = dominantArtworkColor == null
+        ? theme.colorScheme.surfaceContainerHighest
+        : Color.lerp(theme.colorScheme.surfaceContainerHighest, dominantArtworkColor, 0.10)!;
+
+    final rect = const Rect.fromLTWH(0, 0, baseWidth, baseHeight);
+    final backgroundPaint = Paint()
+      ..shader = ui.Gradient.linear(
+        const Offset(0, 0),
+        const Offset(baseWidth, baseHeight),
+        [gradientStartColor, gradientEndColor],
+      );
+    canvas.drawRect(rect, backgroundPaint);
+
+    final cardRect = RRect.fromRectAndRadius(
+      const Rect.fromLTWH(70, 70, baseWidth - 140, baseHeight - 140),
+      const Radius.circular(42),
+    );
+    canvas.drawRRect(
+      cardRect,
+      Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.92),
+    );
+
+    const centerX = baseWidth / 2;
+    const vinylCenterY = 500.0;
+    const vinylRadius = 262.0;
+
+    final isDark = theme.brightness == Brightness.dark;
+    final vinylBaseColor = Color.lerp(Colors.black, theme.colorScheme.onSurface, 0.12)!;
+    final grooveColor = Color.lerp(Colors.white, theme.colorScheme.onSurface, 0.35)!;
+    final separatorColor =
+        isDark ? Colors.white.withValues(alpha: 0.78) : Colors.black.withValues(alpha: 0.68);
+    final centerLabelColor =
+        Color.lerp(theme.colorScheme.surface, theme.colorScheme.surfaceContainerHighest, 0.55)!;
+
+    canvas.drawCircle(const Offset(centerX, vinylCenterY), vinylRadius, Paint()..color = vinylBaseColor);
+
+    for (var index = 0; index < 24; index++) {
+      final t = index / 23;
+      final radius = ui.lerpDouble(vinylRadius * 0.37, vinylRadius * 0.97, t)!;
+      final opacity = 0.12 + (0.10 * (1 - t));
+      final stroke = 0.8 + (0.35 * (1 - t));
+      canvas.drawCircle(
+        const Offset(centerX, vinylCenterY),
+        radius,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..color = grooveColor.withValues(alpha: (isDark ? 0.10 : 0.14) * (opacity / 0.14)),
+      );
+    }
+
+    final vinylRect = Rect.fromCircle(center: const Offset(centerX, vinylCenterY), radius: vinylRadius);
+    canvas.drawCircle(
+      const Offset(centerX, vinylCenterY),
+      vinylRadius,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          vinylRect.topLeft,
+          vinylRect.bottomRight,
+          [
+            Colors.white.withValues(alpha: isDark ? 0.20 : 0.16),
+            Colors.white.withValues(alpha: 0.04),
+            Colors.transparent,
+            Colors.black.withValues(alpha: isDark ? 0.18 : 0.10),
+          ],
+          const [0.0, 0.24, 0.55, 1.0],
+        ),
+    );
+
+    const separatorRadius = vinylRadius * 0.56;
+    canvas.drawCircle(
+      const Offset(centerX, vinylCenterY),
+      separatorRadius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = math.max(1.6, (vinylRadius * 2) * 0.014)
+        ..color = separatorColor,
+    );
+
+    const artworkRadius = vinylRadius * 0.50;
+    final artworkRect = Rect.fromCircle(center: const Offset(centerX, vinylCenterY), radius: artworkRadius);
+    if (artworkImage != null) {
+      canvas.save();
+      canvas.clipPath(Path()..addOval(artworkRect));
+      paintImage(
+        canvas: canvas,
+        rect: artworkRect,
+        image: artworkImage,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.high,
+      );
+      canvas.restore();
+    } else {
+      canvas.drawOval(artworkRect, Paint()..color = centerLabelColor);
+    }
+
+    const centerOuterRadius = vinylRadius * 0.036;
+    canvas.drawCircle(const Offset(centerX, vinylCenterY), centerOuterRadius, Paint()..color = theme.colorScheme.surface);
+    canvas.drawCircle(
+      const Offset(centerX, vinylCenterY),
+      vinylRadius * 0.013,
+      Paint()..color = theme.colorScheme.onSurface.withValues(alpha: 0.90),
+    );
+
+    final title = widget.controller.songTitle.trim().isEmpty
+        ? l10n.nowPlayingDefaultTitle
+        : widget.controller.songTitle.trim();
+    final artist = widget.controller.artistName.trim().isEmpty
+        ? l10n.unknownArtist
+        : widget.controller.artistName.trim();
+
+    final titlePainter = TextPainter(
+      text: TextSpan(
+        text: title,
+        style: theme.textTheme.headlineSmall?.copyWith(
+          fontSize: (theme.textTheme.headlineSmall?.fontSize ?? 24) + 13,
+          fontWeight: FontWeight.w800,
+          color: theme.colorScheme.onSurface,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 2,
+      ellipsis: '…',
+      textAlign: TextAlign.center,
+    )..layout(maxWidth: 820);
+    const titleTop = 830.0;
+    titlePainter.paint(canvas, Offset((baseWidth - titlePainter.width) / 2, titleTop));
+
+    final artistPainter = TextPainter(
+      text: TextSpan(
+        text: artist,
+        style: theme.textTheme.titleMedium?.copyWith(
+          fontSize: (theme.textTheme.titleMedium?.fontSize ?? 16) + 3,
+          fontWeight: FontWeight.w700,
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.90),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '…',
+      textAlign: TextAlign.center,
+    )..layout(maxWidth: 820);
+    const artistTop = 938.0;
+    artistPainter.paint(canvas, Offset((baseWidth - artistPainter.width) / 2, artistTop));
+
+    final footerPainter = TextPainter(
+      text: TextSpan(
+        text: l10n.snapshotGeneratedWithBrand,
+        style: theme.textTheme.labelLarge?.copyWith(
+          fontSize: (theme.textTheme.labelLarge?.fontSize ?? 14) + 2,
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    footerPainter.paint(canvas, Offset((baseWidth - footerPainter.width) / 2, baseHeight - 112));
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(exportWidth, exportHeight);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  Future<ui.Image?> _loadBasicSnapshotArtworkImage() async {
+    final artworkUrl = widget.controller.nowPlayingArtworkUrl?.trim();
+    if (artworkUrl == null || artworkUrl.isEmpty) {
+      return null;
+    }
+    try {
+      final uri = Uri.tryParse(artworkUrl);
+      if (uri == null) {
+        return null;
+      }
+      final data = await NetworkAssetBundle(uri).load(artworkUrl);
+      final bytes = data.buffer.asUint8List();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      return frame.image;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Color?> _extractDominantArtworkColor(ui.Image? artworkImage) async {
+    if (artworkImage == null) {
+      return null;
+    }
+
+    try {
+      final byteData = await artworkImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (byteData == null) {
+        return null;
+      }
+
+      final bytes = byteData.buffer.asUint8List();
+      final width = artworkImage.width;
+      final height = artworkImage.height;
+      final stepX = math.max(1, width ~/ 36);
+      final stepY = math.max(1, height ~/ 36);
+
+      var totalRed = 0;
+      var totalGreen = 0;
+      var totalBlue = 0;
+      var totalWeight = 0;
+
+      for (var y = 0; y < height; y += stepY) {
+        for (var x = 0; x < width; x += stepX) {
+          final index = ((y * width) + x) * 4;
+          if (index + 3 >= bytes.length) {
+            continue;
+          }
+
+          final red = bytes[index];
+          final green = bytes[index + 1];
+          final blue = bytes[index + 2];
+          final alpha = bytes[index + 3];
+
+          if (alpha < 24) {
+            continue;
+          }
+
+          final weight = alpha;
+          totalRed += red * weight;
+          totalGreen += green * weight;
+          totalBlue += blue * weight;
+          totalWeight += weight;
+        }
+      }
+
+      if (totalWeight == 0) {
+        return null;
+      }
+
+      final averagedColor = Color.fromARGB(
+        255,
+        (totalRed / totalWeight).round().clamp(0, 255),
+        (totalGreen / totalWeight).round().clamp(0, 255),
+        (totalBlue / totalWeight).round().clamp(0, 255),
+      );
+
+      final hsl = HSLColor.fromColor(averagedColor);
+      final saturation = (hsl.saturation * 0.78).clamp(0.20, 0.65).toDouble();
+      final lightness = hsl.lightness.clamp(0.22, 0.62).toDouble();
+      return hsl.withSaturation(saturation).withLightness(lightness).toColor();
+    } catch (_) {
+      return null;
+    }
   }
 
   void _onSearchManuallyPressed() {

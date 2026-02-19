@@ -85,14 +85,14 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
   void _showInfoModal() {
     const githubUrl = 'https://github.com/iozamudioa';
     var useArtworkBackground = widget.useArtworkBackground;
+    var isDarkMode = widget.isDarkMode;
 
     showDialog<void>(
       context: context,
       barrierDismissible: true,
       barrierColor: Colors.transparent,
       builder: (context) {
-        final theme = Theme.of(context);
-        final l10n = AppLocalizations.of(context);
+        final dialogTheme = Theme.of(context);
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => Navigator.of(context).pop(),
@@ -111,174 +111,239 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
                     constraints: const BoxConstraints(maxWidth: 380),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.surface.withValues(alpha: 0.68),
+                        color: dialogTheme.colorScheme.surface.withValues(alpha: 0.68),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: theme.colorScheme.onSurface.withValues(alpha: 0.10)),
+                        border: Border.all(
+                          color: dialogTheme.colorScheme.onSurface.withValues(alpha: 0.10),
+                        ),
                       ),
                       padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
                       margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
                       child: StatefulBuilder(
                         builder: (context, modalSetState) {
+                          final seedColor = widget.theme.colorScheme.primary;
+                          final modalColorScheme = ColorScheme.fromSeed(
+                            seedColor: seedColor,
+                            brightness: isDarkMode ? Brightness.dark : Brightness.light,
+                          );
+                          final theme = Theme.of(context).copyWith(
+                            colorScheme: modalColorScheme,
+                          );
+                          final l10n = AppLocalizations.of(context);
                           return FutureBuilder<PackageInfo>(
                             future: _packageInfoFuture,
                             builder: (context, snapshot) {
                               final version = snapshot.data?.version ?? '1.1.0';
-                              return Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Center(
-                                    child: Text('SingSync', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Center(
-                                    child: SizedBox(
-                                      width: 94,
-                                      height: 94,
-                                      child: Stack(
-                                        alignment: Alignment.center,
-                                        children: [
-                                          Container(
-                                            width: 94,
-                                            height: 94,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              gradient: RadialGradient(
-                                                colors: [
-                                                  theme.colorScheme.onSurface.withValues(alpha: 0.26),
-                                                  theme.colorScheme.onSurface.withValues(alpha: 0.62),
-                                                ],
-                                                stops: const [0.12, 1],
-                                              ),
-                                            ),
-                                          ),
-                                          Container(
-                                            width: 74,
-                                            height: 74,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: theme.colorScheme.onSurface.withValues(alpha: 0.22),
-                                              ),
-                                            ),
-                                          ),
-                                          Container(
-                                            width: 50,
-                                            height: 50,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: theme.colorScheme.onSurface.withValues(alpha: 0.18),
-                                              ),
-                                            ),
-                                          ),
-                                          Container(
-                                            width: 36,
-                                            height: 36,
-                                            decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: theme.colorScheme.surface,
-                                                width: 1.8,
-                                              ),
-                                            ),
-                                            child: ClipOval(
-                                              child: Image.asset(
-                                                'assets/app_icon/singsync.png',
-                                                fit: BoxFit.cover,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(l10n.developerBy),
-                                  const SizedBox(height: 6),
-                                  Wrap(
-                                    crossAxisAlignment: WrapCrossAlignment.center,
-                                    children: [
-                                      Text('${l10n.githubLabel} '),
-                                      InkWell(
-                                        onTap: () {
-                                          launchUrl(
-                                            Uri.parse(githubUrl),
-                                            mode: LaunchMode.externalApplication,
-                                          );
-                                        },
-                                        child: Text(
-                                          githubUrl,
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: theme.colorScheme.primary,
-                                            decoration: TextDecoration.underline,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(l10n.versionLabel(version)),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    l10n.poweredByLrclib,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
-                                      ),
-                                    ),
-                                    child: Row(
+                              return Theme(
+                                data: theme,
+                                child: DefaultTextStyle.merge(
+                                  style: TextStyle(color: theme.colorScheme.onSurface),
+                                  child: IconTheme.merge(
+                                    data: IconThemeData(color: theme.colorScheme.onSurface),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Expanded(
-                                          child: Column(
+                                        const Center(
+                                          child: Text(
+                                            'SingSync',
+                                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Center(
+                                          child: SizedBox(
+                                            width: 94,
+                                            height: 94,
+                                            child: Stack(
+                                              alignment: Alignment.center,
+                                              children: [
+                                                Container(
+                                                  width: 94,
+                                                  height: 94,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    gradient: RadialGradient(
+                                                      colors: [
+                                                        theme.colorScheme.onSurface.withValues(alpha: 0.26),
+                                                        theme.colorScheme.onSurface.withValues(alpha: 0.62),
+                                                      ],
+                                                      stops: const [0.12, 1],
+                                                    ),
+                                                  ),
+                                                ),
+                                                Container(
+                                                  width: 74,
+                                                  height: 74,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                      color: theme.colorScheme.onSurface.withValues(alpha: 0.22),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Container(
+                                                  width: 50,
+                                                  height: 50,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                      color: theme.colorScheme.onSurface.withValues(alpha: 0.18),
+                                                    ),
+                                                  ),
+                                                ),
+                                                Container(
+                                                  width: 36,
+                                                  height: 36,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    border: Border.all(
+                                                      color: theme.colorScheme.surface,
+                                                      width: 1.8,
+                                                    ),
+                                                  ),
+                                                  child: ClipOval(
+                                                    child: Image.asset(
+                                                      'assets/app_icon/singsync.png',
+                                                      fit: BoxFit.cover,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(l10n.developerBy),
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          crossAxisAlignment: WrapCrossAlignment.center,
+                                          children: [
+                                            Text('${l10n.githubLabel} '),
+                                            InkWell(
+                                              onTap: () {
+                                                launchUrl(
+                                                  Uri.parse(githubUrl),
+                                                  mode: LaunchMode.externalApplication,
+                                                );
+                                              },
+                                              child: Text(
+                                                githubUrl,
+                                                style: theme.textTheme.bodyMedium?.copyWith(
+                                                  color: theme.colorScheme.primary,
+                                                  decoration: TextDecoration.underline,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(l10n.versionLabel(version)),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          l10n.poweredByLrclib,
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                            color: theme.colorScheme.onSurface,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
+                                            ),
+                                          ),
+                                          child: Row(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              Text(
-                                                l10n.useArtworkBackground,
-                                                style: const TextStyle(fontWeight: FontWeight.w600),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                l10n.useSolidBackgroundDescription,
-                                                style: theme.textTheme.bodySmall?.copyWith(
-                                                  color: theme.colorScheme.onSurfaceVariant,
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      l10n.useArtworkBackground,
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w600,
+                                                        color: theme.colorScheme.onSurface,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      l10n.useSolidBackgroundDescription,
+                                                      style: theme.textTheme.bodySmall?.copyWith(
+                                                        color: theme.colorScheme.onSurfaceVariant,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Switch.adaptive(
+                                                value: useArtworkBackground,
+                                                onChanged: (value) {
+                                                  modalSetState(() {
+                                                    useArtworkBackground = value;
+                                                  });
+                                                  widget.onUseArtworkBackgroundChanged(value);
+                                                },
                                               ),
                                             ],
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
-                                        Switch.adaptive(
-                                          value: useArtworkBackground,
-                                          onChanged: (value) {
-                                            modalSetState(() {
-                                              useArtworkBackground = value;
-                                            });
-                                            widget.onUseArtworkBackgroundChanged(value);
-                                          },
+                                        const SizedBox(height: 10),
+                                        Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  isDarkMode ? l10n.switchToLightMode : l10n.switchToDarkMode,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                    color: theme.colorScheme.onSurface,
+                                                  ),
+                                                ),
+                                              ),
+                                              IconButton(
+                                                onPressed: () {
+                                                  modalSetState(() {
+                                                    isDarkMode = !isDarkMode;
+                                                  });
+                                                  widget.onToggleTheme();
+                                                },
+                                                icon: Icon(
+                                                  isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                                                ),
+                                                tooltip: isDarkMode
+                                                    ? l10n.switchToLightMode
+                                                    : l10n.switchToDarkMode,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: TextButton(
+                                            onPressed: () => Navigator.of(context).pop(),
+                                            child: Text(l10n.close),
+                                          ),
                                         ),
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
-                                  Align(
-                                    alignment: Alignment.centerRight,
-                                    child: TextButton(
-                                      onPressed: () => Navigator.of(context).pop(),
-                                      child: Text(l10n.close),
-                                    ),
-                                  ),
-                                ],
+                                ),
                               );
                             },
                           );
@@ -383,15 +448,6 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
           onPressed: _showInfoModal,
           icon: const Icon(Icons.info_outline_rounded),
           tooltip: AppLocalizations.of(context).infoTooltip,
-        ),
-        IconButton(
-          onPressed: widget.onToggleTheme,
-          icon: Icon(
-            widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-          ),
-          tooltip: widget.isDarkMode
-              ? AppLocalizations.of(context).switchToLightMode
-              : AppLocalizations.of(context).switchToDarkMode,
         ),
       ],
     );
