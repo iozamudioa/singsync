@@ -1,6 +1,7 @@
 package net.iozamudioa.lyric_notifier
 
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
@@ -196,8 +197,102 @@ class MainActivity: FlutterActivity() {
 				"consumeSnapshotSavedFeedback" -> {
 					result.success(SnapshotShareBridge.consumeSavedFeedback())
 				}
+				"listSavedSnapshots" -> {
+					Thread {
+						val snapshots = listSavedSnapshots()
+						runOnUiThread {
+							result.success(snapshots)
+						}
+					}.start()
+				}
+				"readSnapshotImageBytes" -> {
+					val uriRaw = call.argument<String>("uri").orEmpty()
+					if (uriRaw.isBlank()) {
+						result.success(null)
+						return@setMethodCallHandler
+					}
+
+					Thread {
+						val bytes = readSnapshotImageBytes(uriRaw)
+						runOnUiThread {
+							result.success(bytes)
+						}
+					}.start()
+				}
+				"deleteSnapshotImage" -> {
+					val uriRaw = call.argument<String>("uri").orEmpty()
+					if (uriRaw.isBlank()) {
+						result.success(false)
+						return@setMethodCallHandler
+					}
+
+					Thread {
+						val deleted = deleteSnapshotImage(uriRaw)
+						runOnUiThread {
+							result.success(deleted)
+						}
+					}.start()
+				}
 				else -> result.notImplemented()
 			}
+		}
+	}
+
+	private fun listSavedSnapshots(): List<String> {
+		val resolver = contentResolver
+		val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+		val projection = arrayOf(
+			MediaStore.Images.Media._ID,
+		)
+
+		val (selection, selectionArgs) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+			Pair(
+				"${MediaStore.Images.Media.RELATIVE_PATH}=? AND ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?",
+				arrayOf("${Environment.DIRECTORY_PICTURES}/SingSync/", "singsync_snapshot_%"),
+			)
+		} else {
+			Pair(
+				"${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?",
+				arrayOf("singsync_snapshot_%"),
+			)
+		}
+
+		val uris = mutableListOf<String>()
+		resolver.query(
+			collection,
+			projection,
+			selection,
+			selectionArgs,
+			"${MediaStore.Images.Media.DATE_ADDED} DESC",
+		)?.use { cursor ->
+			val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+			while (cursor.moveToNext()) {
+				val id = cursor.getLong(idColumn)
+				val uri = ContentUris.withAppendedId(collection, id)
+				uris += uri.toString()
+			}
+		}
+
+		return uris
+	}
+
+	private fun readSnapshotImageBytes(uriRaw: String): ByteArray? {
+		return try {
+			val uri = Uri.parse(uriRaw)
+			contentResolver.openInputStream(uri)?.use { input ->
+				input.readBytes()
+			}
+		} catch (_: Throwable) {
+			null
+		}
+	}
+
+	private fun deleteSnapshotImage(uriRaw: String): Boolean {
+		return try {
+			val uri = Uri.parse(uriRaw)
+			contentResolver.delete(uri, null, null) > 0
+		} catch (_: Throwable) {
+			false
 		}
 	}
 

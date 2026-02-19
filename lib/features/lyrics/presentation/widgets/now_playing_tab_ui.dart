@@ -264,6 +264,7 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
                           ? controller.associateSelectedSearchLyricsToCurrentSong
                           : null,
                       onCopyFeedbackVisibleChanged: _handleCopyFeedbackVisibility,
+                      onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
                       onTap: controller.retrySearchLyricsIfNeeded,
                       onScrollDirectionChanged: _handleLyricsScrollDirection,
                     ),

@@ -32,6 +32,7 @@ class NowPlayingTab extends StatefulWidget {
     required this.onToggleTheme,
     required this.onSearchManually,
     this.onExpandedLandscapeModeChanged,
+    this.onSnapshotSavedToGallery,
   });
 
   final LyricsController controller;
@@ -40,6 +41,7 @@ class NowPlayingTab extends StatefulWidget {
   final VoidCallback onToggleTheme;
   final VoidCallback onSearchManually;
   final ValueChanged<bool>? onExpandedLandscapeModeChanged;
+  final Future<void> Function()? onSnapshotSavedToGallery;
 
   @override
   State<NowPlayingTab> createState() => _NowPlayingTabState();
@@ -325,6 +327,16 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
       }
 
       if (Platform.isAndroid) {
+        final shouldShare = await _showSnapshotPreviewDialog(pngBytes);
+        if (!mounted) {
+          _isBasicSnapshotBusy = false;
+          return;
+        }
+        if (!shouldShare) {
+          _isBasicSnapshotBusy = false;
+          return;
+        }
+
         final shared = await _shareSnapshotViaAndroidChooser(pngBytes);
         if (!mounted) {
           _isBasicSnapshotBusy = false;
@@ -350,6 +362,107 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     }
   }
 
+  Future<bool> _showSnapshotPreviewDialog(Uint8List pngBytes) async {
+    final l10n = AppLocalizations.of(context);
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.transparent,
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        final size = MediaQuery.of(dialogContext).size;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(dialogContext).pop(false),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                  child: ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
+                ),
+              ),
+              Center(
+                child: GestureDetector(
+                  onTap: () {},
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: math.min(520.0, size.width * 0.92),
+                      maxHeight: size.height * 0.84,
+                    ),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface.withValues(alpha: 0.68),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(14),
+                              child: InteractiveViewer(
+                                minScale: 1,
+                                maxScale: 3.2,
+                                child: Image.memory(
+                                  pngBytes,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final saved = await _saveSnapshotToGallery(pngBytes);
+                                    if (!dialogContext.mounted) {
+                                      return;
+                                    }
+                                    Navigator.of(dialogContext).pop(false);
+                                    if (!mounted) {
+                                      return;
+                                    }
+                                    if (saved) {
+                                      await widget.onSnapshotSavedToGallery?.call();
+                                    }
+                                    _showFeedback(saved ? l10n.snapshotSaved : l10n.snapshotError);
+                                  },
+                                  icon: const Icon(Icons.save_alt_rounded),
+                                  label: Text(l10n.saveToGallery),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                                  icon: const Icon(Icons.share_rounded),
+                                  label: Text(l10n.share),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    return result == true;
+  }
+
   Future<bool> _shareSnapshotViaAndroidChooser(Uint8List pngBytes) async {
     final launched = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'shareSnapshotWithSaveOption',
@@ -359,6 +472,17 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
       },
     );
     return launched == true;
+  }
+
+  Future<bool> _saveSnapshotToGallery(Uint8List pngBytes) async {
+    final saved = await _lyricsMethodsChannel.invokeMethod<dynamic>(
+      'saveSnapshotImage',
+      {
+        'bytes': pngBytes,
+        'fileName': 'singsync_snapshot_basic_${DateTime.now().millisecondsSinceEpoch}.png',
+      },
+    );
+    return saved == true;
   }
 
   void _showFeedback(String message) {
@@ -926,6 +1050,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                       showActionButtons: controller.hasActiveNowPlayingLyrics,
                                       onCopyFeedbackVisibleChanged:
                                           _handleCopyFeedbackVisibility,
+                                      onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
                                       onTap: controller.onNowPlayingLyricsTap,
                                       onScrollDirectionChanged: null,
                                     ),
@@ -1024,6 +1149,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                       showActionButtons: controller.hasActiveNowPlayingLyrics,
                                       onCopyFeedbackVisibleChanged:
                                           _handleCopyFeedbackVisibility,
+                                      onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
                                       onTap: controller.onNowPlayingLyricsTap,
                                       onScrollDirectionChanged: _handleLyricsScrollDirection,
                                     ),

@@ -356,6 +356,12 @@ abstract class AppLocalizations {
   /// **'Compartir'**
   String get share;
 
+  /// No description provided for @saveToGallery.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardar en galería'**
+  String get saveToGallery;
+
   /// No description provided for @associateToSong.
   ///
   /// In es, this message translates to:
@@ -373,6 +379,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Imagen lista para compartir'**
   String get snapshotReady;
+
+  /// No description provided for @snapshotSaved.
+  ///
+  /// In es, this message translates to:
+  /// **'Imagen guardada'**
+  String get snapshotSaved;
 
   /// No description provided for @snapshotError.
   ///
@@ -463,6 +475,30 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'No hay favoritos aún'**
   String get noFavoritesYet;
+
+  /// No description provided for @savedSnapshotsTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Portadas para el recuerdo'**
+  String get savedSnapshotsTitle;
+
+  /// No description provided for @noSavedSnapshotsYet.
+  ///
+  /// In es, this message translates to:
+  /// **'Aún no hay imágenes guardadas'**
+  String get noSavedSnapshotsYet;
+
+  /// No description provided for @delete.
+  ///
+  /// In es, this message translates to:
+  /// **'Borrar'**
+  String get delete;
+
+  /// No description provided for @snapshotDeleted.
+  ///
+  /// In es, this message translates to:
+  /// **'Imagen eliminada'**
+  String get snapshotDeleted;
 
   /// No description provided for @spotifyLabel.
   ///

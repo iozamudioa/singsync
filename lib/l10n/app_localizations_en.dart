@@ -151,6 +151,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get share => 'Share';
 
   @override
+  String get saveToGallery => 'Save to gallery';
+
+  @override
   String get associateToSong => 'Associate to song';
 
   @override
@@ -158,6 +161,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get snapshotReady => 'Image ready to share';
+
+  @override
+  String get snapshotSaved => 'Image saved';
 
   @override
   String get snapshotError => 'Could not generate image';
@@ -203,6 +209,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noFavoritesYet => 'No favorites yet';
+
+  @override
+  String get savedSnapshotsTitle => 'Cover Memories';
+
+  @override
+  String get noSavedSnapshotsYet => 'No saved images yet';
+
+  @override
+  String get delete => 'Delete';
+
+  @override
+  String get snapshotDeleted => 'Image deleted';
 
   @override
   String get spotifyLabel => 'Spotify';
