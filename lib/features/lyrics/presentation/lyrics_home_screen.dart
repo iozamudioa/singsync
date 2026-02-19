@@ -7,6 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../../../app/theme_controller.dart';
 import '../../../l10n/app_localizations.dart';
 import 'lyrics_controller.dart';
+import 'widgets/app_top_feedback.dart';
 import 'widgets/home_header.dart';
 import 'widgets/now_playing_tab.dart';
 
@@ -83,6 +84,129 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         _checkAndShowPermissionDialog();
       });
     });
+  }
+
+  Future<void> _toggleCurrentFavorite() async {
+    final toggledToFavorite = await widget.controller.toggleCurrentFavorite();
+    if (!mounted || toggledToFavorite == null) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context);
+    AppTopFeedback.show(
+      context,
+      toggledToFavorite
+          ? l10n.favoriteAdded
+          : l10n.favoriteRemoved,
+    );
+  }
+
+  void _openFavoritesLibraryModal() {
+    final screenSize = MediaQuery.of(context).size;
+    final isLandscape = screenSize.width > screenSize.height;
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+        maxWidth: screenSize.width,
+        maxHeight: screenSize.height * (isLandscape ? 0.90 : 0.82),
+      ),
+      builder: (context) {
+        final theme = Theme.of(context);
+        final l10n = AppLocalizations.of(context);
+        return AnimatedBuilder(
+          animation: widget.controller,
+          builder: (context, _) {
+            final favorites = widget.controller.favoriteLibrary;
+            if (favorites.isEmpty) {
+              return SizedBox(
+                height: 180,
+                child: Center(
+                  child: Text(
+                    l10n.noFavoritesYet,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                ),
+              );
+            }
+
+            return SafeArea(
+              child: ListView.separated(
+                itemCount: favorites.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final item = favorites[index];
+                  return Dismissible(
+                    key: ValueKey('favorite_${item.key}_${item.createdAtMs}'),
+                    direction: DismissDirection.horizontal,
+                    background: Container(
+                      color: theme.colorScheme.errorContainer,
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                    secondaryBackground: Container(
+                      color: theme.colorScheme.errorContainer,
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                    onDismissed: (_) async {
+                      final removed = await widget.controller.removeFavoriteEntry(item);
+                      if (!removed || !mounted) {
+                        return;
+                      }
+                      AppTopFeedback.show(
+                        this.context,
+                        AppLocalizations.of(this.context).favoriteDeleted,
+                        duration: const Duration(milliseconds: 1300),
+                      );
+                    },
+                    child: ListTile(
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: (item.artworkUrl ?? '').trim().isEmpty
+                            ? const SizedBox(
+                                width: 42,
+                                height: 42,
+                                child: ColoredBox(color: Colors.black12),
+                              )
+                            : Image.network(
+                                item.artworkUrl!,
+                                width: 42,
+                                height: 42,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const SizedBox(
+                                  width: 42,
+                                  height: 42,
+                                  child: ColoredBox(color: Colors.black12),
+                                ),
+                              ),
+                      ),
+                      title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(item.artist, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () async {
+                        Navigator.of(context).pop();
+                        await widget.controller.showFavoriteInNowPlaying(item);
+                      },
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -217,61 +341,75 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                   ),
                 ),
               SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (!_hideHomeHeaderForExpandedVinyl)
-                        HomeHeader(
-                          theme: theme,
-                          songTitle: widget.controller.songTitle,
-                          artistName: widget.controller.artistName,
-                          isDarkMode: widget.themeController.isDarkMode,
-                          onToggleTheme: widget.themeController.toggleTheme,
-                          useArtworkBackground: _useArtworkBackground,
-                          onUseArtworkBackgroundChanged: _handleUseArtworkBackgroundChanged,
-                        ),
-                      if (!widget.controller.hasNotificationListenerAccess) ...[
-                        const SizedBox(height: 12),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.notifications_active_outlined,
-                                  color: theme.colorScheme.primary,
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    l10n.enableNotificationsCard,
-                                    style: theme.textTheme.bodyMedium,
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: AppTopFeedback.visibility,
+                  builder: (context, isFeedbackVisible, child) {
+                    return AnimatedPadding(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      padding: EdgeInsets.only(bottom: isFeedbackVisible ? 70 : 0),
+                      child: child,
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (!_hideHomeHeaderForExpandedVinyl)
+                          HomeHeader(
+                            theme: theme,
+                            songTitle: widget.controller.songTitle,
+                            artistName: widget.controller.artistName,
+                            isDarkMode: widget.themeController.isDarkMode,
+                            onToggleTheme: widget.themeController.toggleTheme,
+                            useArtworkBackground: _useArtworkBackground,
+                            onUseArtworkBackgroundChanged: _handleUseArtworkBackgroundChanged,
+                            isCurrentFavorite: widget.controller.isCurrentNowPlayingFavorite,
+                            onToggleFavorite: _toggleCurrentFavorite,
+                            onOpenFavorites: _openFavoritesLibraryModal,
+                          ),
+                        if (!widget.controller.hasNotificationListenerAccess) ...[
+                          const SizedBox(height: 12),
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.notifications_active_outlined,
+                                    color: theme.colorScheme.primary,
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                FilledButton(
-                                  onPressed: _openPermissionSettings,
-                                  child: Text(l10n.allow),
-                                ),
-                              ],
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      l10n.enableNotificationsCard,
+                                      style: theme.textTheme.bodyMedium,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  FilledButton(
+                                    onPressed: _openPermissionSettings,
+                                    child: Text(l10n.allow),
+                                  ),
+                                ],
+                              ),
                             ),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: NowPlayingTab(
+                            controller: widget.controller,
+                            theme: theme,
+                            isDarkMode: widget.themeController.isDarkMode,
+                            onToggleTheme: widget.themeController.toggleTheme,
+                            onSearchManually: widget.controller.startManualCandidatesFromNowPlaying,
+                            onExpandedLandscapeModeChanged: _handleExpandedLandscapeModeChanged,
                           ),
                         ),
                       ],
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: NowPlayingTab(
-                          controller: widget.controller,
-                          theme: theme,
-                          isDarkMode: widget.themeController.isDarkMode,
-                          onToggleTheme: widget.themeController.toggleTheme,
-                          onSearchManually: widget.controller.startManualCandidatesFromNowPlaying,
-                          onExpandedLandscapeModeChanged: _handleExpandedLandscapeModeChanged,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),

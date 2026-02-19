@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../../l10n/app_localizations.dart';
+import 'app_top_feedback.dart';
 
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
@@ -871,18 +872,11 @@ class _LyricsPanelState extends State<LyricsPanel>
   }
 
   void _showFeedback(BuildContext context, String message) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    widget.onCopyFeedbackVisibleChanged?.call(true);
-    final controller = messenger.showSnackBar(
-      SnackBar(
-        duration: const Duration(milliseconds: 1400),
-        content: Text(message, textAlign: TextAlign.center),
-      ),
+    AppTopFeedback.show(
+      context,
+      message,
+      onVisibilityChanged: widget.onCopyFeedbackVisibleChanged,
     );
-    controller.closed.whenComplete(() {
-      widget.onCopyFeedbackVisibleChanged?.call(false);
-    });
   }
 
   String _buildShareableLyrics() {

@@ -3,6 +3,7 @@ part of 'now_playing_tab.dart';
 extension _NowPlayingTabUi on _NowPlayingTabState {
   Widget _buildPlatformButtonsRow({required bool artistOnly}) {
     final installed = widget.controller.installedMediaAppPackages;
+    final l10n = AppLocalizations.of(context);
     final buttons = <Widget>[];
 
     void addButton({
@@ -30,25 +31,25 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
       packageName: _NowPlayingTabState._spotifyPackage,
       onPressed: artistOnly ? _openArtistInSpotify : _openInSpotify,
       icon: const FaIcon(FontAwesomeIcons.spotify),
-      tooltip: 'Spotify',
+      tooltip: l10n.spotifyLabel,
     );
     addButton(
       packageName: _NowPlayingTabState._youtubeMusicPackage,
       onPressed: artistOnly ? _openArtistInYouTubeMusic : _openInYouTubeMusic,
       icon: const FaIcon(FontAwesomeIcons.youtube),
-      tooltip: 'YouTube Music',
+      tooltip: l10n.youtubeMusicLabel,
     );
     addButton(
       packageName: _NowPlayingTabState._amazonMusicPackage,
       onPressed: artistOnly ? _openArtistInAmazonMusic : _openInAmazonMusic,
       icon: const FaIcon(FontAwesomeIcons.amazon),
-      tooltip: 'Amazon Music',
+      tooltip: l10n.amazonMusicLabel,
     );
     addButton(
       packageName: _NowPlayingTabState._appleMusicPackage,
       onPressed: artistOnly ? _openArtistInAppleMusic : _openInAppleMusic,
       icon: const FaIcon(FontAwesomeIcons.apple),
-      tooltip: 'Apple Music',
+      tooltip: l10n.appleMusicLabel,
     );
 
     if (buttons.isEmpty) {
@@ -133,6 +134,24 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
           tooltip: l10n.next,
         ),
       ],
+    );
+  }
+
+  Widget _buildResumePausedPlaybackButton() {
+    final controller = widget.controller;
+    if (!controller.canResumePausedPlaybackAfterFavorite) {
+      return const SizedBox.shrink();
+    }
+
+    final isSpanish = Localizations.localeOf(context).languageCode.toLowerCase() == 'es';
+    final label = isSpanish ? 'Continuar reproducción' : 'Resume playback';
+    return OutlinedButton.icon(
+      onPressed: controller.resumePausedPlaybackAfterFavorite,
+      icon: const Icon(Icons.play_circle_fill_rounded),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+      ),
     );
   }
 

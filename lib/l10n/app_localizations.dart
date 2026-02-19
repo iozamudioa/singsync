@@ -422,6 +422,72 @@ abstract class AppLocalizations {
   /// **'No se pudo asociar la letra'**
   String get lyricsNotAssociated;
 
+  /// No description provided for @favoriteAdded.
+  ///
+  /// In es, this message translates to:
+  /// **'Añadida a tus favoritos'**
+  String get favoriteAdded;
+
+  /// No description provided for @favoriteRemoved.
+  ///
+  /// In es, this message translates to:
+  /// **'Se quitó de tus favoritos'**
+  String get favoriteRemoved;
+
+  /// No description provided for @favoriteDeleted.
+  ///
+  /// In es, this message translates to:
+  /// **'Se elimino de favoritos'**
+  String get favoriteDeleted;
+
+  /// No description provided for @addToFavorites.
+  ///
+  /// In es, this message translates to:
+  /// **'Agregar a favoritos'**
+  String get addToFavorites;
+
+  /// No description provided for @removeFromFavorites.
+  ///
+  /// In es, this message translates to:
+  /// **'Quitar de favoritos'**
+  String get removeFromFavorites;
+
+  /// No description provided for @favoritesLibrary.
+  ///
+  /// In es, this message translates to:
+  /// **'Biblioteca'**
+  String get favoritesLibrary;
+
+  /// No description provided for @noFavoritesYet.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay favoritos aún'**
+  String get noFavoritesYet;
+
+  /// No description provided for @spotifyLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Spotify'**
+  String get spotifyLabel;
+
+  /// No description provided for @youtubeMusicLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'YouTube Music'**
+  String get youtubeMusicLabel;
+
+  /// No description provided for @amazonMusicLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Amazon Music'**
+  String get amazonMusicLabel;
+
+  /// No description provided for @appleMusicLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Apple Music'**
+  String get appleMusicLabel;
+
   /// No description provided for @permissionMissingMessage.
   ///
   /// In es, this message translates to:

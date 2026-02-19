@@ -77,6 +77,10 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             _buildPlatformButtonsRow(artistOnly: false),
+            if (controller.canResumePausedPlaybackAfterFavorite) ...[
+              const SizedBox(height: 10),
+              _buildResumePausedPlaybackButton(),
+            ],
             if (controller.canShowManualSearchButton) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -136,7 +140,16 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                             _buildPlayerControlsRow(),
                             _buildActivePlayerButton(),
                           ] else if (hasActiveNowPlaying || canOpenMediaApps)
-                            _buildPlatformButtonsRow(artistOnly: false),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildPlatformButtonsRow(artistOnly: false),
+                                if (controller.canResumePausedPlaybackAfterFavorite) ...[
+                                  const SizedBox(height: 10),
+                                  _buildResumePausedPlaybackButton(),
+                                ],
+                              ],
+                            ),
                         ],
                       ),
                     );
@@ -180,35 +193,53 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                           child: Align(
                             alignment: Alignment.centerLeft,
                             child: SizedBox(
-                              width: math.min(260.0, math.max(140.0, constraints.maxWidth * 0.22)),
-                              child: IgnorePointer(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      displayTitle,
-                                      maxLines: 3,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.left,
-                                      style: theme.textTheme.titleLarge?.copyWith(
-                                        fontWeight: FontWeight.w800,
-                                        color: theme.colorScheme.onSurface.withValues(alpha: 0.96),
-                                      ),
+                              width: math.min(300.0, math.max(180.0, constraints.maxWidth * 0.26)),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  IconButton(
+                                    onPressed: _toggleCurrentFavoriteWithFeedback,
+                                    icon: Icon(
+                                      controller.isCurrentNowPlayingFavorite
+                                          ? Icons.favorite_rounded
+                                          : Icons.favorite_border_rounded,
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      displayArtist,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      textAlign: TextAlign.left,
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        fontWeight: FontWeight.w500,
-                                        color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
-                                      ),
+                                    tooltip: controller.isCurrentNowPlayingFavorite
+                                      ? l10n.removeFromFavorites
+                                      : l10n.addToFavorites,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          displayTitle,
+                                          maxLines: 3,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.left,
+                                          style: theme.textTheme.titleLarge?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                            color: theme.colorScheme.onSurface.withValues(alpha: 0.96),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          displayArtist,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.left,
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.w500,
+                                            color: theme.colorScheme.onSurface.withValues(alpha: 0.78),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),

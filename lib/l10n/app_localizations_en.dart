@@ -184,6 +184,39 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lyricsNotAssociated => 'Could not associate lyrics';
 
   @override
+  String get favoriteAdded => 'Added to your favorites';
+
+  @override
+  String get favoriteRemoved => 'Removed from favorites';
+
+  @override
+  String get favoriteDeleted => 'Deleted from favorites';
+
+  @override
+  String get addToFavorites => 'Add to favorites';
+
+  @override
+  String get removeFromFavorites => 'Remove from favorites';
+
+  @override
+  String get favoritesLibrary => 'Library';
+
+  @override
+  String get noFavoritesYet => 'No favorites yet';
+
+  @override
+  String get spotifyLabel => 'Spotify';
+
+  @override
+  String get youtubeMusicLabel => 'YouTube Music';
+
+  @override
+  String get amazonMusicLabel => 'Amazon Music';
+
+  @override
+  String get appleMusicLabel => 'Apple Music';
+
+  @override
   String get permissionMissingMessage =>
       'Enable notification access for this app and play a song to load lyrics.';
 

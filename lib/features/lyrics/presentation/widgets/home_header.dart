@@ -17,6 +17,9 @@ class HomeHeader extends StatefulWidget {
     required this.useArtworkBackground,
     required this.onUseArtworkBackgroundChanged,
     this.onHeaderTap,
+    this.isCurrentFavorite = false,
+    this.onToggleFavorite,
+    this.onOpenFavorites,
   });
 
   final ThemeData theme;
@@ -27,6 +30,9 @@ class HomeHeader extends StatefulWidget {
   final bool useArtworkBackground;
   final ValueChanged<bool> onUseArtworkBackgroundChanged;
   final VoidCallback? onHeaderTap;
+  final bool isCurrentFavorite;
+  final VoidCallback? onToggleFavorite;
+  final VoidCallback? onOpenFavorites;
 
   @override
   State<HomeHeader> createState() => _HomeHeaderState();
@@ -367,9 +373,17 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
       fontWeight: FontWeight.w700,
     );
     final fullHeaderText = '${widget.songTitle.trim()} - ${widget.artistName.trim()}';
+    final l10n = AppLocalizations.of(context);
 
     return Row(
       children: [
+        IconButton(
+          onPressed: widget.onToggleFavorite,
+          icon: Icon(
+            widget.isCurrentFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          ),
+          tooltip: widget.isCurrentFavorite ? l10n.removeFromFavorites : l10n.addToFavorites,
+        ),
         Expanded(
           child: Material(
             color: Colors.transparent,
@@ -444,6 +458,11 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
               ),
             ),
           ),
+        IconButton(
+          onPressed: widget.onOpenFavorites,
+          icon: const Icon(Icons.library_music_rounded),
+          tooltip: l10n.favoritesLibrary,
+        ),
         IconButton(
           onPressed: _showInfoModal,
           icon: const Icon(Icons.info_outline_rounded),

@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../domain/lyrics_candidate.dart';
 import '../lyrics_controller.dart';
+import 'app_top_feedback.dart';
 import 'lyrics_panel.dart';
 import 'music_search_icon.dart';
 
@@ -364,14 +365,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     if (!mounted) {
       return;
     }
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        duration: const Duration(milliseconds: 1400),
-        content: Text(message, textAlign: TextAlign.center),
-      ),
-    );
+    AppTopFeedback.show(context, message);
   }
 
   ButtonStyle _snapshotActionButtonStyle(ThemeData theme) {
@@ -660,6 +654,19 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     widget.onSearchManually();
   }
 
+  Future<void> _toggleCurrentFavoriteWithFeedback() async {
+    final toggledToFavorite = await widget.controller.toggleCurrentFavorite();
+    if (!mounted || toggledToFavorite == null) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context);
+    AppTopFeedback.show(
+      context,
+      toggledToFavorite ? l10n.favoriteAdded : l10n.favoriteRemoved,
+    );
+  }
+
   void _handleAutoExpandOnManualPrompt({
     required LyricsController controller,
     required String nowPlayingKey,
@@ -758,7 +765,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                 child: AnimatedPadding(
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOut,
-                  padding: EdgeInsets.only(bottom: _isCopyToastVisible ? 64 : 0),
+                  padding: EdgeInsets.zero,
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 320),
                     switchInCurve: Curves.easeOutCubic,
@@ -873,6 +880,10 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
                                                     _buildPlatformButtonsRow(artistOnly: false),
+                                                    if (controller.canResumePausedPlaybackAfterFavorite) ...[
+                                                      const SizedBox(height: 10),
+                                                      _buildResumePausedPlaybackButton(),
+                                                    ],
                                                     const SizedBox(height: 10),
                                                     if (controller.canShowManualSearchButton)
                                                       OutlinedButton.icon(
@@ -979,7 +990,16 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                               _buildPlayerControlsRow(),
                               _buildActivePlayerButton(),
                             ] else if (hasActiveNowPlaying || canOpenMediaApps)
-                              _buildPlatformButtonsRow(artistOnly: false),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildPlatformButtonsRow(artistOnly: false),
+                                  if (controller.canResumePausedPlaybackAfterFavorite) ...[
+                                    const SizedBox(height: 10),
+                                    _buildResumePausedPlaybackButton(),
+                                  ],
+                                ],
+                              ),
                             const SizedBox(height: 10),
                             if (hasActiveNowPlaying && controller.canShowManualSearchButton)
                               Align(

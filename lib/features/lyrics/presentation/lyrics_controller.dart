@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../l10n/app_localizations.dart';
 
@@ -54,6 +56,7 @@ class LyricsController extends ChangeNotifier {
     'com.amazon.mp3',
     'com.apple.android.music',
   ];
+  static const String _favoritesPrefKey = 'favorite_library_v1';
 
   String songTitle = 'Now Playing';
   String artistName = '';
@@ -89,10 +92,15 @@ class LyricsController extends ChangeNotifier {
   bool _artistInsightCacheReady = false;
   String? _artistInsightInFlightKey;
   Future<ArtistInsight?>? _artistInsightInFlight;
+  List<FavoriteSongEntry> _favoriteLibrary = const <FavoriteSongEntry>[];
+  bool _hasPausedPlaybackForFavorite = false;
+  String? _pausedPlaybackSourcePackageForFavorite;
+  String? _pausedPlaybackPreferredPackageForFavorite;
 
   void start() {
     refreshNotificationPermissionStatus();
     unawaited(refreshInstalledMediaApps());
+    unawaited(loadFavoriteLibrary());
 
     _subscription = _gateway.nowPlayingStream().listen(
       onNowPlayingEvent,
@@ -104,6 +112,231 @@ class LyricsController extends ChangeNotifier {
     );
 
     loadCurrentNowPlayingOnStartup();
+  }
+
+  List<FavoriteSongEntry> get favoriteLibrary => List<FavoriteSongEntry>.unmodifiable(_favoriteLibrary);
+
+  bool get canResumePausedPlaybackAfterFavorite {
+    return _hasPausedPlaybackForFavorite && nowPlayingSourceType == 'favorite';
+  }
+
+  bool get isCurrentNowPlayingFavorite {
+    final title = songTitle.trim();
+    final artist = artistName.trim();
+    if (title.isEmpty || artist.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
+      return false;
+    }
+
+    final key = _favoriteKey(title: title, artist: artist);
+    return _favoriteLibrary.any((entry) => entry.key == key);
+  }
+
+  String _favoriteKey({required String title, required String artist}) {
+    return '${title.trim().toLowerCase()}|${artist.trim().toLowerCase()}';
+  }
+
+  Future<void> loadFavoriteLibrary() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_favoritesPrefKey);
+      if (raw == null || raw.trim().isEmpty) {
+        _favoriteLibrary = const <FavoriteSongEntry>[];
+        _notifySafely();
+        return;
+      }
+
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        _favoriteLibrary = const <FavoriteSongEntry>[];
+        _notifySafely();
+        return;
+      }
+
+      final parsed = <FavoriteSongEntry>[];
+      for (final item in decoded) {
+        if (item is Map<String, dynamic>) {
+          final entry = FavoriteSongEntry.fromJson(item);
+          if (entry.title.trim().isNotEmpty && entry.artist.trim().isNotEmpty) {
+            parsed.add(entry);
+          }
+          continue;
+        }
+        if (item is Map) {
+          final normalized = <String, dynamic>{};
+          for (final entry in item.entries) {
+            normalized[entry.key.toString()] = entry.value;
+          }
+          final favorite = FavoriteSongEntry.fromJson(normalized);
+          if (favorite.title.trim().isNotEmpty && favorite.artist.trim().isNotEmpty) {
+            parsed.add(favorite);
+          }
+        }
+      }
+
+      _favoriteLibrary = parsed;
+      _notifySafely();
+    } catch (_) {
+      _favoriteLibrary = const <FavoriteSongEntry>[];
+      _notifySafely();
+    }
+  }
+
+  Future<void> _persistFavoriteLibrary() async {
+    final prefs = await SharedPreferences.getInstance();
+    final payload = _favoriteLibrary.map((entry) => entry.toJson()).toList(growable: false);
+    await prefs.setString(_favoritesPrefKey, jsonEncode(payload));
+  }
+
+  Future<bool?> toggleCurrentFavorite() async {
+    final title = songTitle.trim();
+    final artist = artistName.trim();
+    if (title.isEmpty || artist.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
+      return null;
+    }
+
+    final key = _favoriteKey(title: title, artist: artist);
+    final existingIndex = _favoriteLibrary.indexWhere((entry) => entry.key == key);
+    if (existingIndex >= 0) {
+      final next = List<FavoriteSongEntry>.from(_favoriteLibrary)..removeAt(existingIndex);
+      _favoriteLibrary = next;
+      await _persistFavoriteLibrary();
+      _notifySafely();
+      return false;
+    }
+
+    final lyrics = _looksLikeUiStateMessage(nowPlayingLyrics) ? '' : nowPlayingLyrics;
+    final favorite = FavoriteSongEntry(
+      title: title,
+      artist: artist,
+      lyrics: lyrics,
+      artworkUrl: nowPlayingArtworkUrl,
+      createdAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    final next = <FavoriteSongEntry>[favorite, ..._favoriteLibrary]
+        .fold<List<FavoriteSongEntry>>(<FavoriteSongEntry>[], (acc, item) {
+      if (acc.any((entry) => entry.key == item.key)) {
+        return acc;
+      }
+      acc.add(item);
+      return acc;
+    });
+    _favoriteLibrary = next.take(250).toList(growable: false);
+    await _persistFavoriteLibrary();
+    _notifySafely();
+    return true;
+  }
+
+  Future<bool> removeFavoriteEntry(FavoriteSongEntry favorite) async {
+    final existingIndex = _favoriteLibrary.indexWhere((entry) => entry.key == favorite.key);
+    if (existingIndex < 0) {
+      return false;
+    }
+
+    final next = List<FavoriteSongEntry>.from(_favoriteLibrary)..removeAt(existingIndex);
+    _favoriteLibrary = next;
+    await _persistFavoriteLibrary();
+    _notifySafely();
+    return true;
+  }
+
+  Future<void> showFavoriteInNowPlaying(FavoriteSongEntry favorite) async {
+    final shouldPauseCurrentPlayback =
+        hasActiveNowPlaying && isNowPlayingFromMediaPlayer && isNowPlayingPlaybackActive;
+
+    if (shouldPauseCurrentPlayback) {
+      final sourcePackageBeforePause = nowPlayingSourcePackage;
+      final preferredPackageBeforePause = preferredMediaAppPackage;
+      _armNoPlaybackGraceWindow();
+      final didPause = await _gateway.mediaPlayPause(sourcePackage: sourcePackageBeforePause);
+
+      if (didPause) {
+        _hasPausedPlaybackForFavorite = true;
+        _pausedPlaybackSourcePackageForFavorite = sourcePackageBeforePause;
+        _pausedPlaybackPreferredPackageForFavorite = preferredPackageBeforePause;
+      } else if (!_hasPausedPlaybackForFavorite) {
+        _clearPausedPlaybackRestoreState();
+      }
+    }
+
+    ++_nowPlayingRequestId;
+    _lastAutoLookupKey = null;
+    _stopPlaybackPolling();
+
+    hasActiveNowPlaying = true;
+    isNowPlayingPlaybackActive = false;
+    nowPlayingPlaybackPositionMs = 0;
+    isLoadingNowPlayingLyrics = false;
+    isAdLikeNowPlaying = false;
+    nowPlayingSourceType = 'favorite';
+    nowPlayingSourcePackage = null;
+    preferredMediaAppPackage = null;
+
+    songTitle = favorite.title;
+    artistName = favorite.artist;
+    nowPlayingArtworkUrl = favorite.artworkUrl;
+    nowPlayingLyrics = favorite.lyrics.trim().isEmpty ? _notFoundMessage : favorite.lyrics;
+
+    isManualSearchMode = false;
+    isManualSearchFormVisible = false;
+    _notifySafely();
+  }
+
+  Future<void> resumePausedPlaybackAfterFavorite() async {
+    if (!_hasPausedPlaybackForFavorite) {
+      return;
+    }
+
+    final sourcePackage = _pausedPlaybackSourcePackageForFavorite;
+    final preferredPackage = _pausedPlaybackPreferredPackageForFavorite;
+
+    _armNoPlaybackGraceWindow();
+    final resumed = await _gateway.mediaPlayPause(sourcePackage: sourcePackage);
+    if (!resumed) {
+      return;
+    }
+
+    if ((preferredPackage ?? '').trim().isNotEmpty) {
+      preferredMediaAppPackage = preferredPackage;
+    } else if ((sourcePackage ?? '').trim().isNotEmpty) {
+      preferredMediaAppPackage = sourcePackage;
+    }
+
+    if ((sourcePackage ?? '').trim().isNotEmpty) {
+      nowPlayingSourcePackage = sourcePackage;
+    }
+
+    nowPlayingSourceType = 'media_player';
+    hasActiveNowPlaying = true;
+    isNowPlayingPlaybackActive = true;
+    _startPlaybackPolling();
+
+    _clearPausedPlaybackRestoreState();
+    _notifySafely();
+    unawaited(_recoverNowPlayingAfterFavoriteResume());
+  }
+
+  Future<void> _recoverNowPlayingAfterFavoriteResume() async {
+    for (var attempt = 0; attempt < 14; attempt++) {
+      if (_disposed || !isNowPlayingFromMediaPlayer) {
+        return;
+      }
+
+      await Future.delayed(Duration(milliseconds: 220 * (attempt + 1)));
+      if (_disposed || !isNowPlayingFromMediaPlayer) {
+        return;
+      }
+
+      final payload = await _gateway.getCurrentNowPlaying();
+      if (_disposed) {
+        return;
+      }
+
+      if (payload != null) {
+        await onNowPlayingEvent(payload);
+        return;
+      }
+    }
   }
 
   Future<void> loadCurrentNowPlayingOnStartup() async {
@@ -249,6 +482,7 @@ class LyricsController extends ChangeNotifier {
   Future<void> _applyNoPlaybackState() async {
     ++_nowPlayingRequestId;
     _lastAutoLookupKey = null;
+    _clearPausedPlaybackRestoreState();
     hasActiveNowPlaying = false;
     _stopPlaybackPolling();
     isNowPlayingPlaybackActive = false;
@@ -545,6 +779,7 @@ class LyricsController extends ChangeNotifier {
     }
     _lastAutoLookupKey = eventKey;
     final requestId = ++_nowPlayingRequestId;
+    _clearPausedPlaybackRestoreState();
     hasActiveNowPlaying = true;
 
     isManualSearchMode = false;
@@ -851,6 +1086,12 @@ class LyricsController extends ChangeNotifier {
     _playbackPollTimer = null;
     _noPlaybackStateMisses = 0;
     _suppressNoPlaybackUntilEpochMs = 0;
+  }
+
+  void _clearPausedPlaybackRestoreState() {
+    _hasPausedPlaybackForFavorite = false;
+    _pausedPlaybackSourcePackageForFavorite = null;
+    _pausedPlaybackPreferredPackageForFavorite = null;
   }
 
   Future<void> searchLyricsManually() async {
@@ -1405,5 +1646,45 @@ class LyricsController extends ChangeNotifier {
     _stopPlaybackPolling();
     _subscription?.cancel();
     super.dispose();
+  }
+}
+
+class FavoriteSongEntry {
+  const FavoriteSongEntry({
+    required this.title,
+    required this.artist,
+    required this.lyrics,
+    required this.artworkUrl,
+    required this.createdAtMs,
+  });
+
+  final String title;
+  final String artist;
+  final String lyrics;
+  final String? artworkUrl;
+  final int createdAtMs;
+
+  String get key => '${title.trim().toLowerCase()}|${artist.trim().toLowerCase()}';
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'title': title,
+      'artist': artist,
+      'lyrics': lyrics,
+      'artworkUrl': artworkUrl,
+      'createdAtMs': createdAtMs,
+    };
+  }
+
+  factory FavoriteSongEntry.fromJson(Map<String, dynamic> json) {
+    return FavoriteSongEntry(
+      title: (json['title'] ?? '').toString(),
+      artist: (json['artist'] ?? '').toString(),
+      lyrics: (json['lyrics'] ?? '').toString(),
+      artworkUrl: (json['artworkUrl'] ?? '').toString().trim().isEmpty
+          ? null
+          : json['artworkUrl'].toString(),
+      createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
+    );
   }
 }
