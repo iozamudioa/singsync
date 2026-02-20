@@ -95,6 +95,14 @@ flutter build appbundle --release
 
 ---
 
+## Cumplimiento Google Play
+
+Checklist práctico (Data safety + disclosure + riesgos de policy):
+
+- [Google Play Compliance Checklist](docs/google-play-compliance-checklist.md)
+
+---
+
 ## Firma y secretos (o cómo no autoboicotearte)
 
 La firma release usa `android/key.properties` y keystore local.  
