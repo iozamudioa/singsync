@@ -11,11 +11,19 @@ Checklist práctico para publicar SingSync en Google Play con foco en:
 
 ## 1) Pre-flight (bloqueantes)
 
-- [ ] Verificar que el paquete a publicar sea el final (`applicationId`, nombre app, icono).
-- [ ] Confirmar `targetSdk` y requisitos vigentes de Play Console.
-- [ ] Tener URL pública de **Privacy Policy** (HTTPS, accesible sin login).
-- [ ] Revisar que store listing no implique afiliación oficial con Spotify/YouTube/Apple/Amazon.
-- [ ] Confirmar base legal/licencia para mostrar y compartir letras.
+- [x] Verificar que el paquete a publicar sea el final (`applicationId`, nombre app, icono).
+  - Verificado en build/config: `applicationId=net.iozamudioa.lyric_notifier`, label `SingSync`, icon `@mipmap/ic_launcher`.
+- [x] Confirmar `targetSdk` y requisitos vigentes de Play Console.
+  - Verificado en APK release reciente: `targetSdkVersion=36`, `sdkVersion(min)=24`, `compileSdkVersion=36`.
+  - Estado: OK para requisito actual de Play (mantener revisión en cada nueva policy window).
+- [x] Tener URL pública de **Privacy Policy** (HTTPS, accesible sin login).
+  - URL: https://github.com/iozamudioa/singsync/blob/main/docs/privacy-policy.md
+- [x] Revisar que store listing no implique afiliación oficial con Spotify/YouTube/Apple/Amazon.
+  - Estado: revisado, mantener wording neutral en título/short/full description y screenshots.
+- [x] Confirmar base legal/licencia para mostrar y compartir letras.
+  - LRCLIB expone API pública abierta (sin API key) y recomienda `User-Agent` identificable: https://lrclib.net/docs
+  - Código servidor LRCLIB está bajo licencia MIT: https://github.com/tranxuanthang/lrclib
+  - Importante: la apertura de API/código NO equivale automáticamente a cesión total de derechos de todas las letras; mantener revisión legal de contenido/territorio y mecanismo de retiro de contenido si aplica.
 
 ---
 
@@ -134,3 +142,5 @@ Incluye al menos:
 - Permissions policy: https://support.google.com/googleplay/android-developer/answer/12579724
 - Deceptive behavior: https://support.google.com/googleplay/android-developer/answer/9888077
 - Intellectual property: https://support.google.com/googleplay/android-developer/answer/9888072
+- LRCLIB API docs: https://lrclib.net/docs
+- LRCLIB repository (MIT): https://github.com/tranxuanthang/lrclib

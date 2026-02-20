@@ -100,6 +100,7 @@ flutter build appbundle --release
 Checklist práctico (Data safety + disclosure + riesgos de policy):
 
 - [Google Play Compliance Checklist](docs/google-play-compliance-checklist.md)
+- [Privacy Policy](docs/privacy-policy.md)
 
 ---
 

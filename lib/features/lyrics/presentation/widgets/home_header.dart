@@ -90,6 +90,7 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
 
   void _showInfoModal() {
     const githubUrl = 'https://github.com/iozamudioa';
+    const privacyPolicyUrl = 'https://github.com/iozamudioa/singsync/blob/main/docs/privacy-policy.md';
     var useArtworkBackground = widget.useArtworkBackground;
     var isDarkMode = widget.isDarkMode;
 
@@ -235,6 +236,28 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
                                               },
                                               child: Text(
                                                 githubUrl,
+                                                style: theme.textTheme.bodyMedium?.copyWith(
+                                                  color: theme.colorScheme.primary,
+                                                  decoration: TextDecoration.underline,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Wrap(
+                                          crossAxisAlignment: WrapCrossAlignment.center,
+                                          children: [
+                                            Text('Privacy Policy: '),
+                                            InkWell(
+                                              onTap: () {
+                                                launchUrl(
+                                                  Uri.parse(privacyPolicyUrl),
+                                                  mode: LaunchMode.externalApplication,
+                                                );
+                                              },
+                                              child: Text(
+                                                privacyPolicyUrl,
                                                 style: theme.textTheme.bodyMedium?.copyWith(
                                                   color: theme.colorScheme.primary,
                                                   decoration: TextDecoration.underline,
