@@ -11,9 +11,14 @@
   "goToPermissions": "Ir a permisos",
   "enableNotificationsCard": "Activa acceso a notificaciones para detectar canciones.",
   "allow": "Permitir",
+  "accept": "Aceptar",
+  "cancel": "Cancelar",
   "close": "Cerrar",
+  "search": "Buscar",
+  "configure": "Configurar",
   "developerBy": "Developer by: iozamudioa",
   "githubLabel": "Github:",
+  "privacyPolicyLabel": "Política de privacidad:",
   "versionLabel": "Version: {version}",
   "@versionLabel": {
     "placeholders": {
@@ -83,6 +88,9 @@
   "addToFavorites": "Agregar a favoritos",
   "removeFromFavorites": "Quitar de favoritos",
   "favoritesLibrary": "Biblioteca",
+  "mySongsTitle": "Mis canciones",
+  "searchBySongOrArtist": "Buscar por canción o artista",
+  "noResults": "Sin resultados",
   "noFavoritesYet": "No hay favoritos aún",
   "savedSnapshotsTitle": "Portadas para el recuerdo",
   "noSavedSnapshotsYet": "Aún no hay imágenes guardadas",
@@ -107,5 +115,33 @@
   "searchingMatches": "Buscando coincidencias en lrclib...",
   "apiSearchUnavailable": "No fue posible consultar /api/search en este momento.",
   "retryingMatches": "Reintentando coincidencias en lrclib...",
-  "lrclibUnavailable": "No fue posible consultar lrclib en este momento."
+  "lrclibUnavailable": "No fue posible consultar lrclib en este momento.",
+  "todayLabel": "Hoy",
+  "thisWeekLabel": "Esta semana",
+  "olderLabel": "Anteriores",
+  "sleepTimerMenuTitle": "Temporizador de apagado",
+  "appInfoMenuTitle": "Información de la app",
+  "sleepTimerCompleted": "Temporizador completo.",
+  "sleepTimerCanceled": "Temporizador cancelado",
+  "sleepTimerStatusIn": "Apagado en {time}",
+  "@sleepTimerStatusIn": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "sleepTimerStatusAfterSongs": "{count, plural, =1{Apagado después de # canción} other{Apagado después de # canciones}}",
+  "@sleepTimerStatusAfterSongs": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "sleepTimerStatusNone": "Sin temporizador",
+  "sleepTimerSelectShutdownTime": "Selecciona tiempo de apagado",
+  "sleepTimerCustomSongCountTitle": "Número de canciones",
+  "songsLabel": "Canciones",
+  "sleepTimerSectionByTime": "Detener después de hh:mm tiempo",
+  "sleepTimerCustomTimeButton": "h : mm ?",
+  "sleepTimerSectionBySongs": "Detener después de N canciones",
+  "cancelSleepTimer": "Cancelar temporizador",
+  "sleepTimerActiveTitle": "Temporizador activo"
 }

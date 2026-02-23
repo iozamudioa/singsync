@@ -4,9 +4,15 @@ import android.content.ContentValues
 import android.content.ContentUris
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.Settings
 import androidx.core.content.FileProvider
@@ -14,6 +20,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 class MainActivity: FlutterActivity() {
@@ -99,6 +106,14 @@ class MainActivity: FlutterActivity() {
 				"getInstalledMediaApps" -> {
 					val packages = call.argument<List<String>>("packages") ?: emptyList()
 					result.success(getInstalledMediaApps(packages))
+				}
+				"getMediaAppIcon" -> {
+					val packageName = call.argument<String>("packageName").orEmpty()
+					val maxPx = call.argument<Int>("maxPx") ?: 96
+					result.success(getMediaAppIcon(packageName, maxPx))
+				}
+				"turnScreenOffIfPossible" -> {
+					result.success(turnScreenOffIfPossible())
 				}
 				else -> result.notImplemented()
 			}
@@ -238,11 +253,13 @@ class MainActivity: FlutterActivity() {
 		}
 	}
 
-	private fun listSavedSnapshots(): List<String> {
+	private fun listSavedSnapshots(): List<Map<String, Any>> {
 		val resolver = contentResolver
 		val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
 		val projection = arrayOf(
 			MediaStore.Images.Media._ID,
+			MediaStore.Images.Media.DISPLAY_NAME,
+			MediaStore.Images.Media.DATE_ADDED,
 		)
 
 		val (selection, selectionArgs) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -257,7 +274,7 @@ class MainActivity: FlutterActivity() {
 			)
 		}
 
-		val uris = mutableListOf<String>()
+		val items = mutableListOf<Map<String, Any>>()
 		resolver.query(
 			collection,
 			projection,
@@ -266,14 +283,59 @@ class MainActivity: FlutterActivity() {
 			"${MediaStore.Images.Media.DATE_ADDED} DESC",
 		)?.use { cursor ->
 			val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+			val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+			val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
 			while (cursor.moveToNext()) {
 				val id = cursor.getLong(idColumn)
+				val displayName = cursor.getString(displayNameColumn).orEmpty()
+				val dateAddedSeconds = cursor.getLong(dateAddedColumn)
 				val uri = ContentUris.withAppendedId(collection, id)
-				uris += uri.toString()
+				val metadata = extractSnapshotMetadata(displayName)
+				items += mapOf(
+					"uri" to uri.toString(),
+					"dateAddedMs" to (dateAddedSeconds * 1000L),
+					"displayName" to displayName,
+					"title" to (metadata["title"] ?: ""),
+					"artist" to (metadata["artist"] ?: ""),
+					"sourcePackage" to (metadata["sourcePackage"] ?: ""),
+				)
 			}
 		}
 
-		return uris
+		return items
+	}
+
+	private fun extractSnapshotMetadata(fileName: String): Map<String, String> {
+		if (fileName.isBlank()) {
+			return emptyMap()
+		}
+
+		val withoutExtension = fileName.substringBeforeLast('.')
+		val title = withoutExtension.substringAfter("__t_", "").substringBefore("__a_", "")
+		val artist = withoutExtension.substringAfter("__a_", "").substringBefore("__p_", "")
+		val sourcePackage = withoutExtension.substringAfter("__p_", "")
+
+		fun decode(value: String): String {
+			return try {
+				Uri.decode(value)
+			} catch (_: Throwable) {
+				""
+			}
+		}
+
+		val decodedTitle = decode(title).trim()
+		val decodedArtist = decode(artist).trim()
+		val decodedSource = decode(sourcePackage).trim()
+
+		if (decodedTitle.isEmpty() && decodedArtist.isEmpty() && decodedSource.isEmpty()) {
+			return emptyMap()
+		}
+
+		return mapOf(
+			"title" to decodedTitle,
+			"artist" to decodedArtist,
+			"sourcePackage" to decodedSource,
+		)
 	}
 
 	private fun readSnapshotImageBytes(uriRaw: String): ByteArray? {
@@ -335,6 +397,57 @@ class MainActivity: FlutterActivity() {
 		}
 
 		return installed
+	}
+
+	private fun getMediaAppIcon(packageName: String, maxPx: Int): ByteArray? {
+		if (packageName.isBlank()) {
+			return null
+		}
+
+		return try {
+			val appInfo = packageManager.getApplicationInfo(packageName, 0)
+			val drawable = packageManager.getApplicationIcon(appInfo)
+			val sizePx = maxPx.coerceIn(24, 256)
+			val bitmap = drawableToBitmap(drawable, sizePx)
+			ByteArrayOutputStream().use { stream ->
+				bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+				stream.toByteArray()
+			}
+		} catch (_: Throwable) {
+			null
+		}
+	}
+
+	private fun drawableToBitmap(drawable: Drawable, sizePx: Int): Bitmap {
+		if (drawable is BitmapDrawable) {
+			val rawBitmap = drawable.bitmap
+			if (rawBitmap != null) {
+				if (rawBitmap.width == sizePx && rawBitmap.height == sizePx) {
+					return rawBitmap
+				}
+				return Bitmap.createScaledBitmap(rawBitmap, sizePx, sizePx, true)
+			}
+		}
+
+		val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+		val canvas = Canvas(bitmap)
+		drawable.setBounds(0, 0, canvas.width, canvas.height)
+		drawable.draw(canvas)
+		return bitmap
+	}
+
+	private fun turnScreenOffIfPossible(): Boolean {
+		return try {
+			val powerManager = getSystemService(POWER_SERVICE) as? PowerManager ?: return false
+			val goToSleepMethod = PowerManager::class.java.getMethod(
+				"goToSleep",
+				Long::class.javaPrimitiveType,
+			)
+			goToSleepMethod.invoke(powerManager, SystemClock.uptimeMillis())
+			true
+		} catch (_: Throwable) {
+			false
+		}
 	}
 
 	private fun saveSnapshotImage(bytes: ByteArray, fileName: String): Boolean {
@@ -403,14 +516,7 @@ class MainActivity: FlutterActivity() {
 				addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 			}
 
-			val saveIntent = Intent(this, SnapshotSaveActivity::class.java).apply {
-				putExtra("filePath", cacheFile.absolutePath)
-				putExtra("fileName", safeName)
-			}
-
-			val chooser = Intent.createChooser(shareIntent, null).apply {
-				putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(saveIntent))
-			}
+			val chooser = Intent.createChooser(shareIntent, null)
 
 			startActivity(chooser)
 			true

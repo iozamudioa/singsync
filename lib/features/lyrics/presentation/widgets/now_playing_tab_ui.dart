@@ -86,11 +86,51 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
     return IconButton(
       iconSize: iconSize,
       onPressed: controller.openActivePlayer,
-      icon: FaIcon(
-        _activePlayerIcon(packageName),
-        size: iconSize,
-      ),
+      icon: _activePlayerIconWidget(packageName, iconSize: iconSize),
       tooltip: l10n.openActivePlayer,
+    );
+  }
+
+  Widget _activePlayerIconWidget(String? packageName, {double? iconSize}) {
+    final normalizedPackage = (packageName ?? '').trim();
+    final effectiveSize = iconSize ?? 24;
+    final fallback = FaIcon(
+      _activePlayerIcon(packageName),
+      size: effectiveSize,
+    );
+
+    if (normalizedPackage.isEmpty) {
+      return fallback;
+    }
+
+    final knownBrand = _activePlayerIcon(packageName);
+    if (knownBrand != FontAwesomeIcons.music) {
+      return fallback;
+    }
+
+    final iconFuture = _playerIconFutureByPackage.putIfAbsent(
+      normalizedPackage,
+      () => _loadMediaAppIconBytes(normalizedPackage),
+    );
+
+    return FutureBuilder<Uint8List?>(
+      future: iconFuture,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) {
+          return fallback;
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(effectiveSize * 0.22),
+          child: Image.memory(
+            bytes,
+            width: effectiveSize,
+            height: effectiveSize,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+          ),
+        );
+      },
     );
   }
 
@@ -256,6 +296,7 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
                   : LyricsPanel(
                       theme: theme,
                       lyrics: controller.searchLyrics,
+                      useArtworkBackground: widget.useArtworkBackground,
                       songTitle: controller.songTitle,
                       artistName: controller.artistName,
                       artworkUrl: controller.searchArtworkUrl ?? controller.nowPlayingArtworkUrl,

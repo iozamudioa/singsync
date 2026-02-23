@@ -11,9 +11,14 @@
   "goToPermissions": "Go to permissions",
   "enableNotificationsCard": "Enable notification access to detect songs.",
   "allow": "Allow",
+  "accept": "Accept",
+  "cancel": "Cancel",
   "close": "Close",
+  "search": "Search",
+  "configure": "Configure",
   "developerBy": "Developer by: iozamudioa",
   "githubLabel": "Github:",
+  "privacyPolicyLabel": "Privacy Policy:",
   "versionLabel": "Version: {version}",
   "@versionLabel": {
     "placeholders": {
@@ -83,6 +88,9 @@
   "addToFavorites": "Add to favorites",
   "removeFromFavorites": "Remove from favorites",
   "favoritesLibrary": "Library",
+  "mySongsTitle": "My songs",
+  "searchBySongOrArtist": "Search by song or artist",
+  "noResults": "No results",
   "noFavoritesYet": "No favorites yet",
   "savedSnapshotsTitle": "Cover Memories",
   "noSavedSnapshotsYet": "No saved images yet",
@@ -107,5 +115,33 @@
   "searchingMatches": "Searching matches on lrclib...",
   "apiSearchUnavailable": "Could not query /api/search right now.",
   "retryingMatches": "Retrying matches on lrclib...",
-  "lrclibUnavailable": "Could not query lrclib right now."
+  "lrclibUnavailable": "Could not query lrclib right now.",
+  "todayLabel": "Today",
+  "thisWeekLabel": "This week",
+  "olderLabel": "Older",
+  "sleepTimerMenuTitle": "Sleep timer",
+  "appInfoMenuTitle": "App info",
+  "sleepTimerCompleted": "Sleep timer completed.",
+  "sleepTimerCanceled": "Sleep timer canceled",
+  "sleepTimerStatusIn": "Stops in {time}",
+  "@sleepTimerStatusIn": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "sleepTimerStatusAfterSongs": "{count, plural, =1{Stops after # song} other{Stops after # songs}}",
+  "@sleepTimerStatusAfterSongs": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "sleepTimerStatusNone": "No sleep timer",
+  "sleepTimerSelectShutdownTime": "Select shutdown time",
+  "sleepTimerCustomSongCountTitle": "Number of songs",
+  "songsLabel": "Songs",
+  "sleepTimerSectionByTime": "Stop after hh:mm time",
+  "sleepTimerCustomTimeButton": "h : mm ?",
+  "sleepTimerSectionBySongs": "Stop after N songs",
+  "cancelSleepTimer": "Cancel timer",
+  "sleepTimerActiveTitle": "Sleep timer active"
 }

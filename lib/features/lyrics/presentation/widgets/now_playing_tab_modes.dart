@@ -71,8 +71,6 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
       }
 
       if (hasActiveNowPlaying || canOpenMediaApps) {
-        final shortestSide = math.min(constraints.maxWidth, constraints.maxHeight);
-        final iconSize = shortestSide >= 700 ? 40.0 : 34.0;
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -117,39 +115,56 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                   if (!isLandscape) {
                     return Transform.translate(
                       offset: Offset(startDx * (1 - progress), startDy * (1 - progress)),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+                      child: Stack(
                         children: [
-                          _ArtworkCover(
-                            url: artworkUrl,
-                            size: animatedSize,
-                            isSpinning: controller.isNowPlayingPlaybackActive,
-                            spinAnimation: _vinylSpinController,
-                            seekOffsetTurns: _seekNudgeTurns,
-                            seekCarryTurns: _seekCarryTurns,
-                            canScrub: _canScrubVinyl,
-                            onTouchActiveChanged: _onVinylTouchActiveChanged,
-                            onScrubStart: _onVinylScrubStart,
-                            onScrubUpdate: _onVinylScrubUpdate,
-                            onScrubEnd: _onVinylScrubEnd,
-                            centerIcon: adSourceIcon,
-                            onTap: _toggleVinylExpanded,
-                          ),
-                          const SizedBox(height: 14),
-                          if (hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer) ...[
-                            _buildPlayerControlsRow(),
-                            _buildActivePlayerButton(),
-                          ] else if (hasActiveNowPlaying || canOpenMediaApps)
-                            Column(
+                          Align(
+                            alignment: Alignment.center,
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                _buildPlatformButtonsRow(artistOnly: false),
-                                if (controller.canResumePausedPlaybackAfterFavorite) ...[
-                                  const SizedBox(height: 10),
-                                  _buildResumePausedPlaybackButton(),
-                                ],
+                                _ArtworkCover(
+                                  url: artworkUrl,
+                                  size: animatedSize,
+                                  isSpinning: controller.isNowPlayingPlaybackActive,
+                                  spinAnimation: _vinylSpinController,
+                                  seekOffsetTurns: _seekNudgeTurns,
+                                  seekCarryTurns: _seekCarryTurns,
+                                  canScrub: _canScrubVinyl,
+                                  onTouchActiveChanged: _onVinylTouchActiveChanged,
+                                  onScrubStart: _onVinylScrubStart,
+                                  onScrubUpdate: _onVinylScrubUpdate,
+                                  onScrubEnd: _onVinylScrubEnd,
+                                  centerIcon: adSourceIcon,
+                                  onTap: _toggleVinylExpanded,
+                                ),
+                                const SizedBox(height: 14),
+                                if (hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer) ...[
+                                  _buildPlayerControlsRow(),
+                                  _buildActivePlayerButton(),
+                                ] else if (hasActiveNowPlaying || canOpenMediaApps)
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      _buildPlatformButtonsRow(artistOnly: false),
+                                      if (controller.canResumePausedPlaybackAfterFavorite) ...[
+                                        const SizedBox(height: 10),
+                                        _buildResumePausedPlaybackButton(),
+                                      ],
+                                    ],
+                                  ),
                               ],
                             ),
+                          ),
+                          Positioned(
+                            right: 16,
+                            bottom: 16,
+                            child: IconButton(
+                              style: _snapshotActionButtonStyle(theme),
+                              onPressed: _shareBasicSnapshotFromExpanded,
+                              tooltip: l10n.shareSnapshot,
+                              icon: const Icon(Icons.photo_camera_outlined),
+                            ),
+                          ),
                         ],
                       ),
                     );
@@ -255,17 +270,16 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                             ),
                           ),
                         ),
-                        if (isLandscape)
-                          Positioned(
-                            right: 16,
-                            bottom: 16,
-                            child: IconButton(
-                              style: _snapshotActionButtonStyle(theme),
-                              onPressed: _shareBasicSnapshotFromExpanded,
-                              tooltip: l10n.shareSnapshot,
-                              icon: const Icon(Icons.photo_camera_outlined),
-                            ),
+                        Positioned(
+                          right: 16,
+                          bottom: 16,
+                          child: IconButton(
+                            style: _snapshotActionButtonStyle(theme),
+                            onPressed: _shareBasicSnapshotFromExpanded,
+                            tooltip: l10n.shareSnapshot,
+                            icon: const Icon(Icons.photo_camera_outlined),
                           ),
+                        ),
                       ],
                     ),
                   );

@@ -45,13 +45,28 @@ class AppLocalizationsEs extends AppLocalizations {
   String get allow => 'Permitir';
 
   @override
+  String get accept => 'Aceptar';
+
+  @override
+  String get cancel => 'Cancelar';
+
+  @override
   String get close => 'Cerrar';
+
+  @override
+  String get search => 'Buscar';
+
+  @override
+  String get configure => 'Configurar';
 
   @override
   String get developerBy => 'Developer by: iozamudioa';
 
   @override
   String get githubLabel => 'Github:';
+
+  @override
+  String get privacyPolicyLabel => 'Política de privacidad:';
 
   @override
   String versionLabel(Object version) {
@@ -209,6 +224,15 @@ class AppLocalizationsEs extends AppLocalizations {
   String get favoritesLibrary => 'Biblioteca';
 
   @override
+  String get mySongsTitle => 'Mis canciones';
+
+  @override
+  String get searchBySongOrArtist => 'Buscar por canción o artista';
+
+  @override
+  String get noResults => 'Sin resultados';
+
+  @override
   String get noFavoritesYet => 'No hay favoritos aún';
 
   @override
@@ -293,4 +317,68 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get lrclibUnavailable =>
       'No fue posible consultar lrclib en este momento.';
+
+  @override
+  String get todayLabel => 'Hoy';
+
+  @override
+  String get thisWeekLabel => 'Esta semana';
+
+  @override
+  String get olderLabel => 'Anteriores';
+
+  @override
+  String get sleepTimerMenuTitle => 'Temporizador de apagado';
+
+  @override
+  String get appInfoMenuTitle => 'Información de la app';
+
+  @override
+  String get sleepTimerCompleted => 'Temporizador completo.';
+
+  @override
+  String get sleepTimerCanceled => 'Temporizador cancelado';
+
+  @override
+  String sleepTimerStatusIn(Object time) {
+    return 'Apagado en $time';
+  }
+
+  @override
+  String sleepTimerStatusAfterSongs(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Apagado después de # canciones',
+      one: 'Apagado después de # canción',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sleepTimerStatusNone => 'Sin temporizador';
+
+  @override
+  String get sleepTimerSelectShutdownTime => 'Selecciona tiempo de apagado';
+
+  @override
+  String get sleepTimerCustomSongCountTitle => 'Número de canciones';
+
+  @override
+  String get songsLabel => 'Canciones';
+
+  @override
+  String get sleepTimerSectionByTime => 'Detener después de hh:mm tiempo';
+
+  @override
+  String get sleepTimerCustomTimeButton => 'h : mm ?';
+
+  @override
+  String get sleepTimerSectionBySongs => 'Detener después de N canciones';
+
+  @override
+  String get cancelSleepTimer => 'Cancelar temporizador';
+
+  @override
+  String get sleepTimerActiveTitle => 'Temporizador activo';
 }

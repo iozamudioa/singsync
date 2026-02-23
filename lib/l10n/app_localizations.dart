@@ -164,11 +164,35 @@ abstract class AppLocalizations {
   /// **'Permitir'**
   String get allow;
 
+  /// No description provided for @accept.
+  ///
+  /// In es, this message translates to:
+  /// **'Aceptar'**
+  String get accept;
+
+  /// No description provided for @cancel.
+  ///
+  /// In es, this message translates to:
+  /// **'Cancelar'**
+  String get cancel;
+
   /// No description provided for @close.
   ///
   /// In es, this message translates to:
   /// **'Cerrar'**
   String get close;
+
+  /// No description provided for @search.
+  ///
+  /// In es, this message translates to:
+  /// **'Buscar'**
+  String get search;
+
+  /// No description provided for @configure.
+  ///
+  /// In es, this message translates to:
+  /// **'Configurar'**
+  String get configure;
 
   /// No description provided for @developerBy.
   ///
@@ -181,6 +205,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Github:'**
   String get githubLabel;
+
+  /// No description provided for @privacyPolicyLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Política de privacidad:'**
+  String get privacyPolicyLabel;
 
   /// No description provided for @versionLabel.
   ///
@@ -470,6 +500,24 @@ abstract class AppLocalizations {
   /// **'Biblioteca'**
   String get favoritesLibrary;
 
+  /// No description provided for @mySongsTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Mis canciones'**
+  String get mySongsTitle;
+
+  /// No description provided for @searchBySongOrArtist.
+  ///
+  /// In es, this message translates to:
+  /// **'Buscar por canción o artista'**
+  String get searchBySongOrArtist;
+
+  /// No description provided for @noResults.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin resultados'**
+  String get noResults;
+
   /// No description provided for @noFavoritesYet.
   ///
   /// In es, this message translates to:
@@ -619,6 +667,114 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'No fue posible consultar lrclib en este momento.'**
   String get lrclibUnavailable;
+
+  /// No description provided for @todayLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Hoy'**
+  String get todayLabel;
+
+  /// No description provided for @thisWeekLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta semana'**
+  String get thisWeekLabel;
+
+  /// No description provided for @olderLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Anteriores'**
+  String get olderLabel;
+
+  /// No description provided for @sleepTimerMenuTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Temporizador de apagado'**
+  String get sleepTimerMenuTitle;
+
+  /// No description provided for @appInfoMenuTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Información de la app'**
+  String get appInfoMenuTitle;
+
+  /// No description provided for @sleepTimerCompleted.
+  ///
+  /// In es, this message translates to:
+  /// **'Temporizador completo.'**
+  String get sleepTimerCompleted;
+
+  /// No description provided for @sleepTimerCanceled.
+  ///
+  /// In es, this message translates to:
+  /// **'Temporizador cancelado'**
+  String get sleepTimerCanceled;
+
+  /// No description provided for @sleepTimerStatusIn.
+  ///
+  /// In es, this message translates to:
+  /// **'Apagado en {time}'**
+  String sleepTimerStatusIn(Object time);
+
+  /// No description provided for @sleepTimerStatusAfterSongs.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =1{Apagado después de # canción} other{Apagado después de # canciones}}'**
+  String sleepTimerStatusAfterSongs(num count);
+
+  /// No description provided for @sleepTimerStatusNone.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin temporizador'**
+  String get sleepTimerStatusNone;
+
+  /// No description provided for @sleepTimerSelectShutdownTime.
+  ///
+  /// In es, this message translates to:
+  /// **'Selecciona tiempo de apagado'**
+  String get sleepTimerSelectShutdownTime;
+
+  /// No description provided for @sleepTimerCustomSongCountTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Número de canciones'**
+  String get sleepTimerCustomSongCountTitle;
+
+  /// No description provided for @songsLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Canciones'**
+  String get songsLabel;
+
+  /// No description provided for @sleepTimerSectionByTime.
+  ///
+  /// In es, this message translates to:
+  /// **'Detener después de hh:mm tiempo'**
+  String get sleepTimerSectionByTime;
+
+  /// No description provided for @sleepTimerCustomTimeButton.
+  ///
+  /// In es, this message translates to:
+  /// **'h : mm ?'**
+  String get sleepTimerCustomTimeButton;
+
+  /// No description provided for @sleepTimerSectionBySongs.
+  ///
+  /// In es, this message translates to:
+  /// **'Detener después de N canciones'**
+  String get sleepTimerSectionBySongs;
+
+  /// No description provided for @cancelSleepTimer.
+  ///
+  /// In es, this message translates to:
+  /// **'Cancelar temporizador'**
+  String get cancelSleepTimer;
+
+  /// No description provided for @sleepTimerActiveTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Temporizador activo'**
+  String get sleepTimerActiveTitle;
 }
 
 class _AppLocalizationsDelegate

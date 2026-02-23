@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -28,6 +27,7 @@ class NowPlayingTab extends StatefulWidget {
     super.key,
     required this.controller,
     required this.theme,
+    required this.useArtworkBackground,
     required this.isDarkMode,
     required this.onToggleTheme,
     required this.onSearchManually,
@@ -37,6 +37,7 @@ class NowPlayingTab extends StatefulWidget {
 
   final LyricsController controller;
   final ThemeData theme;
+  final bool useArtworkBackground;
   final bool isDarkMode;
   final VoidCallback onToggleTheme;
   final VoidCallback onSearchManually;
@@ -76,14 +77,20 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
   static const double _dragSeekMsPerTurn = 45000;
   static const int _dragSeekDispatchIntervalMs = 120;
   static const int _dragSeekMinPositionDeltaMs = 500;
+  static const int _dragSeekHapticIntervalMs = 180;
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
     'net.iozamudioa.lyric_notifier/lyrics',
   );
+  static const MethodChannel _nowPlayingMethodsChannel = MethodChannel(
+    'net.iozamudioa.lyric_notifier/now_playing_methods',
+  );
+  final Map<String, Future<Uint8List?>> _playerIconFutureByPackage = <String, Future<Uint8List?>>{};
   Timer? _autoExpandVinylTimer;
   String? _autoExpandPendingKey;
   String? _autoExpandedForKey;
   bool? _lastExpandedLandscapeModeReported;
   bool _isBasicSnapshotBusy = false;
+  int _lastScrubHapticAtMs = 0;
 
   @override
   void initState() {
@@ -111,6 +118,32 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
       ..addListener(() {
         widget.controller.updateSearchQuery(_queryController.text);
       });
+  }
+
+  Future<Uint8List?> _loadMediaAppIconBytes(String packageName) async {
+    final normalizedPackage = packageName.trim();
+    if (normalizedPackage.isEmpty) {
+      return null;
+    }
+
+    try {
+      final bytes = await _nowPlayingMethodsChannel.invokeMethod<dynamic>(
+        'getMediaAppIcon',
+        {
+          'packageName': normalizedPackage,
+          'maxPx': 112,
+        },
+      );
+      if (bytes is Uint8List) {
+        return bytes;
+      }
+      if (bytes is List<int>) {
+        return Uint8List.fromList(bytes);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -162,6 +195,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     _scrubPreviewPositionMs = _scrubStartPositionMs;
     _lastScrubSeekDispatchAtMs = 0;
     _lastScrubSeekDispatchedPositionMs = null;
+    _lastScrubHapticAtMs = 0;
 
     if (!_isVinylScrubbing) {
       setState(() {
@@ -195,6 +229,10 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
 
     _lastScrubSeekDispatchAtMs = now;
     _lastScrubSeekDispatchedPositionMs = candidateMs;
+    if (now - _lastScrubHapticAtMs >= _dragSeekHapticIntervalMs) {
+      _lastScrubHapticAtMs = now;
+      unawaited(HapticFeedback.vibrate());
+    }
     await widget.controller.seekNowPlayingTo(candidateMs);
   }
 
@@ -327,6 +365,23 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
       }
 
       if (Platform.isAndroid) {
+        final snapshotFileName = _buildSnapshotFileName(prefix: 'singsync_snapshot_basic');
+        final skipPreviewAndShare = _isVinylExpanded;
+        final saved = await _saveSnapshotToGallery(pngBytes);
+        if (!mounted) {
+          _isBasicSnapshotBusy = false;
+          return;
+        }
+        if (saved) {
+          _showFeedback(l10n.snapshotSaved);
+          await widget.onSnapshotSavedToGallery?.call();
+        }
+
+        if (skipPreviewAndShare) {
+          _isBasicSnapshotBusy = false;
+          return;
+        }
+
         final shouldShare = await _showSnapshotPreviewDialog(pngBytes);
         if (!mounted) {
           _isBasicSnapshotBusy = false;
@@ -337,7 +392,10 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
           return;
         }
 
-        final shared = await _shareSnapshotViaAndroidChooser(pngBytes);
+        final shared = await _shareSnapshotViaAndroidChooser(
+          pngBytes,
+          fileName: snapshotFileName,
+        );
         if (!mounted) {
           _isBasicSnapshotBusy = false;
           return;
@@ -420,27 +478,6 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                           Row(
                             children: [
                               Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    final saved = await _saveSnapshotToGallery(pngBytes);
-                                    if (!dialogContext.mounted) {
-                                      return;
-                                    }
-                                    Navigator.of(dialogContext).pop(false);
-                                    if (!mounted) {
-                                      return;
-                                    }
-                                    if (saved) {
-                                      await widget.onSnapshotSavedToGallery?.call();
-                                    }
-                                    _showFeedback(saved ? l10n.snapshotSaved : l10n.snapshotError);
-                                  },
-                                  icon: const Icon(Icons.save_alt_rounded),
-                                  label: Text(l10n.saveToGallery),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
                                 child: FilledButton.icon(
                                   onPressed: () => Navigator.of(dialogContext).pop(true),
                                   icon: const Icon(Icons.share_rounded),
@@ -463,23 +500,36 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     return result == true;
   }
 
-  Future<bool> _shareSnapshotViaAndroidChooser(Uint8List pngBytes) async {
+  String _buildSnapshotFileName({String prefix = 'singsync_snapshot'}) {
+    final title = Uri.encodeComponent(widget.controller.songTitle.trim());
+    final artist = Uri.encodeComponent(widget.controller.artistName.trim());
+    final sourcePackage = Uri.encodeComponent(
+      (widget.controller.nowPlayingSourcePackage ?? widget.controller.preferredMediaAppPackage ?? '').trim(),
+    );
+    return '${prefix}_${DateTime.now().millisecondsSinceEpoch}__t_${title}__a_${artist}__p_$sourcePackage.png';
+  }
+
+  Future<bool> _shareSnapshotViaAndroidChooser(
+    Uint8List pngBytes, {
+    required String fileName,
+  }) async {
     final launched = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'shareSnapshotWithSaveOption',
       {
         'bytes': pngBytes,
-        'fileName': 'singsync_snapshot_basic_${DateTime.now().millisecondsSinceEpoch}.png',
+        'fileName': fileName,
       },
     );
     return launched == true;
   }
 
   Future<bool> _saveSnapshotToGallery(Uint8List pngBytes) async {
+    final fileName = _buildSnapshotFileName(prefix: 'singsync_snapshot_basic');
     final saved = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'saveSnapshotImage',
       {
         'bytes': pngBytes,
-        'fileName': 'singsync_snapshot_basic_${DateTime.now().millisecondsSinceEpoch}.png',
+        'fileName': fileName,
       },
     );
     return saved == true;
@@ -518,21 +568,37 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
 
     final artworkImage = await _loadBasicSnapshotArtworkImage();
     final dominantArtworkColor = await _extractDominantArtworkColor(artworkImage);
-    final gradientStartColor = dominantArtworkColor == null
-        ? theme.colorScheme.surface
-        : Color.lerp(theme.colorScheme.surface, dominantArtworkColor, 0.18)!;
-    final gradientEndColor = dominantArtworkColor == null
-        ? theme.colorScheme.surfaceContainerHighest
-        : Color.lerp(theme.colorScheme.surfaceContainerHighest, dominantArtworkColor, 0.10)!;
-
-    final rect = const Rect.fromLTWH(0, 0, baseWidth, baseHeight);
-    final backgroundPaint = Paint()
-      ..shader = ui.Gradient.linear(
-        const Offset(0, 0),
-        const Offset(baseWidth, baseHeight),
-        [gradientStartColor, gradientEndColor],
+    const rect = Rect.fromLTWH(0, 0, baseWidth, baseHeight);
+    final shouldUseArtworkBackground = widget.useArtworkBackground && artworkImage != null;
+    if (shouldUseArtworkBackground) {
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: artworkImage,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.high,
+        opacity: 0.30,
       );
-    canvas.drawRect(rect, backgroundPaint);
+      canvas.drawRect(
+        rect,
+        Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.58),
+      );
+    } else {
+      final gradientStartColor = dominantArtworkColor == null
+          ? theme.colorScheme.surface
+          : Color.lerp(theme.colorScheme.surface, dominantArtworkColor, 0.18)!;
+      final gradientEndColor = dominantArtworkColor == null
+          ? theme.colorScheme.surfaceContainerHighest
+          : Color.lerp(theme.colorScheme.surfaceContainerHighest, dominantArtworkColor, 0.10)!;
+      final backgroundPaint = Paint()
+        ..shader = ui.Gradient.linear(
+          const Offset(0, 0),
+          const Offset(baseWidth, baseHeight),
+          [gradientStartColor, gradientEndColor],
+        );
+      canvas.drawRect(rect, backgroundPaint);
+    }
 
     final cardRect = RRect.fromRectAndRadius(
       const Rect.fromLTWH(70, 70, baseWidth - 140, baseHeight - 140),
@@ -1042,6 +1108,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                   : LyricsPanel(
                                       theme: theme,
                                       lyrics: controller.nowPlayingLyrics,
+                                      useArtworkBackground: widget.useArtworkBackground,
                                       playbackPositionMs: controller.nowPlayingPlaybackPositionMs,
                                       songTitle: controller.songTitle,
                                       artistName: controller.artistName,
@@ -1141,6 +1208,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                   : LyricsPanel(
                                       theme: theme,
                                       lyrics: controller.nowPlayingLyrics,
+                                      useArtworkBackground: widget.useArtworkBackground,
                                       playbackPositionMs: controller.nowPlayingPlaybackPositionMs,
                                       songTitle: controller.songTitle,
                                       artistName: controller.artistName,

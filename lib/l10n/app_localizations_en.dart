@@ -45,13 +45,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get allow => 'Allow';
 
   @override
+  String get accept => 'Accept';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
   String get close => 'Close';
+
+  @override
+  String get search => 'Search';
+
+  @override
+  String get configure => 'Configure';
 
   @override
   String get developerBy => 'Developer by: iozamudioa';
 
   @override
   String get githubLabel => 'Github:';
+
+  @override
+  String get privacyPolicyLabel => 'Privacy Policy:';
 
   @override
   String versionLabel(Object version) {
@@ -208,6 +223,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get favoritesLibrary => 'Library';
 
   @override
+  String get mySongsTitle => 'My songs';
+
+  @override
+  String get searchBySongOrArtist => 'Search by song or artist';
+
+  @override
+  String get noResults => 'No results';
+
+  @override
   String get noFavoritesYet => 'No favorites yet';
 
   @override
@@ -285,4 +309,68 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lrclibUnavailable => 'Could not query lrclib right now.';
+
+  @override
+  String get todayLabel => 'Today';
+
+  @override
+  String get thisWeekLabel => 'This week';
+
+  @override
+  String get olderLabel => 'Older';
+
+  @override
+  String get sleepTimerMenuTitle => 'Sleep timer';
+
+  @override
+  String get appInfoMenuTitle => 'App info';
+
+  @override
+  String get sleepTimerCompleted => 'Sleep timer completed.';
+
+  @override
+  String get sleepTimerCanceled => 'Sleep timer canceled';
+
+  @override
+  String sleepTimerStatusIn(Object time) {
+    return 'Stops in $time';
+  }
+
+  @override
+  String sleepTimerStatusAfterSongs(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Stops after # songs',
+      one: 'Stops after # song',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get sleepTimerStatusNone => 'No sleep timer';
+
+  @override
+  String get sleepTimerSelectShutdownTime => 'Select shutdown time';
+
+  @override
+  String get sleepTimerCustomSongCountTitle => 'Number of songs';
+
+  @override
+  String get songsLabel => 'Songs';
+
+  @override
+  String get sleepTimerSectionByTime => 'Stop after hh:mm time';
+
+  @override
+  String get sleepTimerCustomTimeButton => 'h : mm ?';
+
+  @override
+  String get sleepTimerSectionBySongs => 'Stop after N songs';
+
+  @override
+  String get cancelSleepTimer => 'Cancel timer';
+
+  @override
+  String get sleepTimerActiveTitle => 'Sleep timer active';
 }

@@ -20,6 +20,10 @@ class HomeHeader extends StatefulWidget {
     this.isCurrentFavorite = false,
     this.onToggleFavorite,
     this.onOpenFavorites,
+    this.onInfoActionReady,
+    this.isSleepTimerActive = false,
+    this.sleepTimerTooltip,
+    this.onSleepTimerTap,
   });
 
   final ThemeData theme;
@@ -33,6 +37,10 @@ class HomeHeader extends StatefulWidget {
   final bool isCurrentFavorite;
   final VoidCallback? onToggleFavorite;
   final VoidCallback? onOpenFavorites;
+  final ValueChanged<VoidCallback>? onInfoActionReady;
+  final bool isSleepTimerActive;
+  final String? sleepTimerTooltip;
+  final VoidCallback? onSleepTimerTap;
 
   @override
   State<HomeHeader> createState() => _HomeHeaderState();
@@ -49,6 +57,15 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
     super.initState();
     _controller = AnimationController(vsync: this, duration: const Duration(seconds: 6));
     _packageInfoFuture = PackageInfo.fromPlatform();
+    widget.onInfoActionReady?.call(_showInfoModal);
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.onInfoActionReady != widget.onInfoActionReady) {
+      widget.onInfoActionReady?.call(_showInfoModal);
+    }
   }
 
   @override
@@ -248,7 +265,7 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
                                         Wrap(
                                           crossAxisAlignment: WrapCrossAlignment.center,
                                           children: [
-                                            Text('Privacy Policy: '),
+                                            Text('${l10n.privacyPolicyLabel} '),
                                             InkWell(
                                               onTap: () {
                                                 launchUrl(
@@ -481,16 +498,12 @@ class _HomeHeaderState extends State<HomeHeader> with SingleTickerProviderStateM
               ),
             ),
           ),
-        IconButton(
-          onPressed: widget.onOpenFavorites,
-          icon: const Icon(Icons.library_music_rounded),
-          tooltip: l10n.favoritesLibrary,
-        ),
-        IconButton(
-          onPressed: _showInfoModal,
-          icon: const Icon(Icons.info_outline_rounded),
-          tooltip: AppLocalizations.of(context).infoTooltip,
-        ),
+          if (widget.isSleepTimerActive)
+            IconButton(
+              onPressed: widget.onSleepTimerTap,
+              icon: const Icon(Icons.snooze_rounded),
+              tooltip: widget.sleepTimerTooltip ?? AppLocalizations.of(context).sleepTimerActiveTitle,
+            ),
       ],
     );
   }

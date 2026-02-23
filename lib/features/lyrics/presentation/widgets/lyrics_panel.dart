@@ -17,6 +17,7 @@ class LyricsPanel extends StatefulWidget {
     super.key,
     required this.theme,
     required this.lyrics,
+    required this.useArtworkBackground,
     this.playbackPositionMs,
     required this.songTitle,
     required this.artistName,
@@ -32,6 +33,7 @@ class LyricsPanel extends StatefulWidget {
 
   final ThemeData theme;
   final String lyrics;
+  final bool useArtworkBackground;
   final int? playbackPositionMs;
   final String songTitle;
   final String artistName;
@@ -70,6 +72,8 @@ class _LyricsPanelState extends State<LyricsPanel>
   Offset _snapshotEndCenter = Offset.zero;
   Uint8List? _snapshotPreviewBytes;
   OverlayEntry? _snapshotOverlayEntry;
+  int _lastTimedAutoScrollAtMs = 0;
+  double _lastTimedAutoScrollTarget = -1;
 
   @override
   void initState() {
@@ -224,6 +228,16 @@ class _LyricsPanelState extends State<LyricsPanel>
       }
 
       if (Platform.isAndroid) {
+        final saved = await _saveSnapshotToGallery(pngBytes);
+        if (!mounted) {
+          _isSnapshotFlowBusy = false;
+          return;
+        }
+        if (saved) {
+          _showFeedback(context, l10n.snapshotSaved);
+          await widget.onSnapshotSavedToGallery?.call();
+        }
+
         final shouldShare = await _showSnapshotPreviewDialog(pngBytes);
         if (!mounted) {
           _isSnapshotFlowBusy = false;
@@ -324,30 +338,6 @@ class _LyricsPanelState extends State<LyricsPanel>
                           const SizedBox(height: 12),
                           Row(
                             children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () async {
-                                    final saved = await _saveSnapshotToGallery(pngBytes);
-                                    if (!dialogContext.mounted) {
-                                      return;
-                                    }
-                                    Navigator.of(dialogContext).pop(false);
-                                    if (!mounted) {
-                                      return;
-                                    }
-                                    if (saved) {
-                                      await widget.onSnapshotSavedToGallery?.call();
-                                    }
-                                    _showFeedback(
-                                      context,
-                                      saved ? l10n.snapshotSaved : l10n.snapshotError,
-                                    );
-                                  },
-                                  icon: const Icon(Icons.save_alt_rounded),
-                                  label: Text(l10n.saveToGallery),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton.icon(
                                   onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -522,25 +512,34 @@ class _LyricsPanelState extends State<LyricsPanel>
   }
 
   Future<bool> _shareSnapshotViaAndroidChooser(Uint8List pngBytes) async {
+    final fileName = _buildSnapshotFileName();
     final launched = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'shareSnapshotWithSaveOption',
       {
         'bytes': pngBytes,
-        'fileName': 'singsync_snapshot_${DateTime.now().millisecondsSinceEpoch}.png',
+        'fileName': fileName,
       },
     );
     return launched == true;
   }
 
   Future<bool> _saveSnapshotToGallery(Uint8List pngBytes) async {
+    final fileName = _buildSnapshotFileName();
     final saved = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'saveSnapshotImage',
       {
         'bytes': pngBytes,
-        'fileName': 'singsync_snapshot_${DateTime.now().millisecondsSinceEpoch}.png',
+        'fileName': fileName,
       },
     );
     return saved == true;
+  }
+
+  String _buildSnapshotFileName() {
+    final title = Uri.encodeComponent(widget.songTitle.trim());
+    final artist = Uri.encodeComponent(widget.artistName.trim());
+    final sourcePackage = Uri.encodeComponent('');
+    return 'singsync_snapshot_${DateTime.now().millisecondsSinceEpoch}__t_${title}__a_${artist}__p_$sourcePackage.png';
   }
 
   String _snapshotSavedMessage() {
@@ -562,30 +561,47 @@ class _LyricsPanelState extends State<LyricsPanel>
       Rect.fromLTWH(0, 0, exportWidth.toDouble(), exportHeight.toDouble()),
     );
     canvas.scale(exportScale, exportScale);
-    final rect = Rect.fromLTWH(0, 0, baseWidth, baseHeight);
+    const rect = Rect.fromLTWH(0, 0, baseWidth, baseHeight);
 
     final artworkImage = await _loadSnapshotArtworkImage();
     final dominantArtworkColor = await _extractDominantArtworkColor(artworkImage);
-    final gradientStartColor = dominantArtworkColor == null
-        ? theme.colorScheme.surface
-        : Color.lerp(theme.colorScheme.surface, dominantArtworkColor, 0.18)!;
-    final gradientEndColor = dominantArtworkColor == null
-        ? theme.colorScheme.surfaceContainerHighest
-        : Color.lerp(theme.colorScheme.surfaceContainerHighest, dominantArtworkColor, 0.10)!;
-
-    final backgroundPaint = Paint()
-      ..shader = ui.Gradient.linear(
-        const Offset(0, 0),
-        const Offset(baseWidth, baseHeight),
-        [
-          gradientStartColor,
-          gradientEndColor,
-        ],
+    final shouldUseArtworkBackground = widget.useArtworkBackground && artworkImage != null;
+    if (shouldUseArtworkBackground) {
+      paintImage(
+        canvas: canvas,
+        rect: rect,
+        image: artworkImage,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.high,
+        opacity: 0.30,
       );
-    canvas.drawRect(rect, backgroundPaint);
+      canvas.drawRect(
+        rect,
+        Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.58),
+      );
+    } else {
+      final gradientStartColor = dominantArtworkColor == null
+          ? theme.colorScheme.surface
+          : Color.lerp(theme.colorScheme.surface, dominantArtworkColor, 0.18)!;
+      final gradientEndColor = dominantArtworkColor == null
+          ? theme.colorScheme.surfaceContainerHighest
+          : Color.lerp(theme.colorScheme.surfaceContainerHighest, dominantArtworkColor, 0.10)!;
+
+      final backgroundPaint = Paint()
+        ..shader = ui.Gradient.linear(
+          const Offset(0, 0),
+          const Offset(baseWidth, baseHeight),
+          [
+            gradientStartColor,
+            gradientEndColor,
+          ],
+        );
+      canvas.drawRect(rect, backgroundPaint);
+    }
 
     final cardRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(70, 70, baseWidth - 140, baseHeight - 140),
+      const Rect.fromLTWH(70, 70, baseWidth - 140, baseHeight - 140),
       const Radius.circular(42),
     );
     canvas.drawRRect(
@@ -1088,16 +1104,50 @@ class _LyricsPanelState extends State<LyricsPanel>
       if (!mounted) {
         return;
       }
+      if (!_scrollController.hasClients) {
+        return;
+      }
       final key = _lineKeys[index];
-      final context = key?.currentContext;
+      if (key == null) {
+        return;
+      }
+      final context = key.currentContext;
       if (context == null) {
         return;
       }
+      final renderObject = context.findRenderObject();
+      if (renderObject == null || !renderObject.attached) {
+        return;
+      }
 
-      Scrollable.ensureVisible(
-        context,
-        alignment: 0.38,
-        duration: const Duration(milliseconds: 320),
+      final position = _scrollController.position;
+      final viewport = RenderAbstractViewport.of(renderObject);
+
+      final revealOffset = viewport.getOffsetToReveal(renderObject, 0.38).offset;
+      final targetOffset = revealOffset.clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      final currentOffset = position.pixels;
+      final delta = (targetOffset - currentOffset).abs();
+      if (delta < 20) {
+        return;
+      }
+
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final underCooldown = (nowMs - _lastTimedAutoScrollAtMs) < 260;
+      final tinyTargetShift = _lastTimedAutoScrollTarget >= 0
+          ? (_lastTimedAutoScrollTarget - targetOffset).abs() < 26
+          : false;
+      if (underCooldown && tinyTargetShift) {
+        return;
+      }
+
+      _lastTimedAutoScrollAtMs = nowMs;
+      _lastTimedAutoScrollTarget = targetOffset;
+      _scrollController.animateTo(
+        targetOffset,
+        duration: const Duration(milliseconds: 210),
         curve: Curves.easeOutCubic,
       );
     });
