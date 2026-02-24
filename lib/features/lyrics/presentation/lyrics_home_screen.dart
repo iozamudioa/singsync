@@ -14,6 +14,7 @@ import 'lyrics_controller.dart';
 import 'widgets/app_top_feedback.dart';
 import 'widgets/home_header.dart';
 import 'widgets/now_playing_tab.dart';
+import 'widgets/snapshot_editor_support.dart';
 
 class LyricsHomeScreen extends StatefulWidget {
   const LyricsHomeScreen({
@@ -1269,7 +1270,9 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
           ..addAll(snapshotSourcePackages);
         final updatedCache = <String, Future<Uint8List?>>{};
         for (final uri in uris) {
-          updatedCache[uri] = _snapshotBytesFutureByUri[uri] ?? _readSnapshotImageBytes(uri);
+          updatedCache[uri] = force
+              ? _readSnapshotImageBytes(uri)
+              : (_snapshotBytesFutureByUri[uri] ?? _readSnapshotImageBytes(uri));
         }
         _snapshotBytesFutureByUri
           ..clear()
@@ -1322,6 +1325,268 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     } catch (_) {
       return false;
     }
+  }
+
+  Future<bool> _saveSnapshotBytesToGallery(
+    Uint8List bytes, {
+    required String fileName,
+    String? replaceUri,
+  }) async {
+    try {
+      final saved = await _lyricsMethodsChannel.invokeMethod<dynamic>(
+        'saveSnapshotImage',
+        {
+          'bytes': bytes,
+          'fileName': fileName,
+          if ((replaceUri ?? '').trim().isNotEmpty) 'replaceUri': replaceUri,
+        },
+      );
+      return saved == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _editSavedSnapshotFromGallery(String uri) async {
+    final displayName = _savedSnapshotDisplayNameByUri[uri] ?? '';
+    final l10n = AppLocalizations.of(context);
+    if (displayName.trim().isEmpty) {
+      AppTopFeedback.show(context, 'No se pudo leer metadata de esta imagen');
+      return;
+    }
+
+    final metadata = await SnapshotEditorStore.readMetadataForDisplayName(displayName);
+    if (!mounted) {
+      return;
+    }
+    if (metadata == null || metadata.lyricsLines.isEmpty) {
+      AppTopFeedback.show(context, 'Esta imagen no tiene datos editables guardados');
+      return;
+    }
+
+    final artworkImage = await SnapshotArtworkTools.loadArtworkImage(metadata.artworkUrl);
+    final extractedPalette = await SnapshotArtworkTools.extractPalette(artworkImage);
+    if (!mounted) {
+      return;
+    }
+
+    var selectedLineIndices = metadata.activeLineIndexes
+        .where((index) => index >= 0 && index < metadata.lyricsLines.length)
+        .toSet();
+    if (selectedLineIndices.isEmpty &&
+        metadata.activeLineIndex >= 0 &&
+        metadata.activeLineIndex < metadata.lyricsLines.length) {
+      selectedLineIndices = <int>{metadata.activeLineIndex};
+    }
+    if (selectedLineIndices.isEmpty && metadata.lyricsLines.isNotEmpty) {
+      selectedLineIndices = <int>{0};
+    }
+
+    SnapshotDialogResult? preview;
+    while (mounted) {
+      final lineSelection = await _showSnapshotLineSelectionDialog(
+        lines: metadata.lyricsLines,
+        initialIndexes: selectedLineIndices,
+      );
+      if (!mounted || lineSelection == null) {
+        return;
+      }
+      selectedLineIndices = lineSelection;
+
+      final stepPreview = await _showSnapshotEditPreviewDialog(
+        metadata: metadata,
+        selectedLineIndices: selectedLineIndices,
+        artworkImage: artworkImage,
+        extractedPalette: extractedPalette,
+      );
+      if (!mounted || stepPreview == null) {
+        return;
+      }
+      if (stepPreview.action == SnapshotDialogAction.back) {
+        continue;
+      }
+
+      preview = stepPreview;
+      break;
+    }
+    if (!mounted || preview == null) {
+      return;
+    }
+
+    final fileName = displayName;
+    final sortedSelectedIndices = selectedLineIndices.toList()..sort();
+    final metadataToSave = metadata.copyWith(
+      useArtworkBackground: preview.useArtworkBackground,
+      generatedThemeBrightness:
+          preview.generatedBrightness == Brightness.dark ? 'dark' : 'light',
+      activeLineIndex: sortedSelectedIndices.isEmpty ? -1 : sortedSelectedIndices.first,
+      activeLineIndexes: sortedSelectedIndices,
+      selectedColorValue: preview.selectedColor?.toARGB32(),
+    );
+
+    if (preview.action == SnapshotDialogAction.save) {
+      final saved = await _saveSnapshotBytesToGallery(
+        preview.pngBytes,
+        fileName: fileName,
+        replaceUri: uri,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!saved) {
+        AppTopFeedback.show(context, l10n.snapshotError);
+        return;
+      }
+
+      await SnapshotEditorStore.saveMetadataForDisplayName(
+        displayName: displayName,
+        metadata: metadataToSave,
+      );
+      _snapshotBytesFutureByUri.remove(uri);
+      await _loadSavedSnapshots(force: true);
+      if (mounted) {
+        AppTopFeedback.show(context, l10n.snapshotSaved);
+      }
+      return;
+    }
+
+    final shared = await _shareSnapshotBytes(preview.pngBytes, fileName: fileName);
+    if (!mounted) {
+      return;
+    }
+    if (!shared) {
+      AppTopFeedback.show(context, l10n.snapshotError);
+    }
+  }
+
+  Future<Set<int>?> _showSnapshotLineSelectionDialog({
+    required List<String> lines,
+    required Set<int> initialIndexes,
+  }) async {
+    return SnapshotDialogTools.showLineSelectionDialog(
+      context: context,
+      lines: lines,
+      initialIndexes: initialIndexes,
+      title: 'Selecciona la letra',
+      nextLabel: 'Siguiente',
+    );
+  }
+
+  Future<SnapshotDialogResult?> _showSnapshotEditPreviewDialog({
+    required SnapshotEditorMetadata metadata,
+    required Set<int> selectedLineIndices,
+    required ui.Image? artworkImage,
+    required List<Color> extractedPalette,
+  }) async {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final themeDefaultColor = theme.brightness == Brightness.dark
+        ? theme.colorScheme.surface
+        : theme.colorScheme.surfaceContainerHighest;
+    final fallbackIndex = metadata.activeLineIndexes.isNotEmpty
+        ? metadata.activeLineIndexes.first
+        : metadata.activeLineIndex;
+    final window = SnapshotFlowTools.buildWindowAroundSelection(
+      sourceLines: metadata.lyricsLines,
+      selectedLineIndices: selectedLineIndices,
+      linesAbove: 2,
+      linesBelow: 2,
+      fallbackIndex: fallbackIndex,
+    );
+    final dominantColor = await SnapshotArtworkTools.extractDominantColor(artworkImage);
+    final palette = SnapshotFlowTools.buildPaletteOptions(
+      extractedPalette: extractedPalette,
+      defaultColor: themeDefaultColor,
+      fallbackColor: dominantColor ?? themeDefaultColor,
+      theme: theme,
+    );
+    var selectedColor = metadata.selectedColorValue == null
+        ? palette.first
+        : Color(metadata.selectedColorValue!);
+    var useArtworkBackground = metadata.useArtworkBackground;
+    var generatedBrightness = switch (metadata.generatedThemeBrightness) {
+      'dark' => Brightness.dark,
+      'light' => Brightness.light,
+      _ => theme.brightness,
+    };
+    if (!palette.any((color) => color.toARGB32() == selectedColor.toARGB32())) {
+      selectedColor = palette.first;
+    }
+
+    final generationTheme = SnapshotFlowTools.buildGenerationTheme(
+      baseTheme: theme,
+      brightness: generatedBrightness,
+    );
+
+    final initialBytes = await SnapshotRenderer.buildPng(
+      SnapshotRenderRequest(
+        theme: generationTheme,
+        songTitle: metadata.songTitle,
+        artistName: metadata.artistName,
+        useArtworkBackground: useArtworkBackground,
+        lyricsLines: window.lines,
+        activeLineIndex: window.activeLineIndices.isEmpty ? -1 : window.activeLineIndices.first,
+        activeLineIndices: window.activeLineIndices,
+        noLyricsFallback: l10n.snapshotNoLyrics,
+        generatedWithBrand: l10n.snapshotGeneratedWithBrand,
+        artworkUrl: metadata.artworkUrl,
+        selectedColor: selectedColor,
+        preloadedArtworkImage: artworkImage,
+      ),
+    );
+    if (initialBytes == null || initialBytes.isEmpty || !mounted) {
+      return null;
+    }
+
+    return SnapshotDialogTools.showPreviewDialog(
+      context: context,
+      initialBytes: initialBytes,
+      initialColor: selectedColor,
+      initialUseArtworkBackground: useArtworkBackground,
+      initialGeneratedBrightness: generatedBrightness,
+      canUseArtworkBackground: artworkImage != null,
+      palette: palette,
+      backTooltip: AppLocalizations.of(context).back,
+      saveTooltip: l10n.saveToGallery,
+      shareTooltip: l10n.share,
+      useArtworkBackgroundLabel: l10n.useArtworkBackground,
+      lightThemeLabel: l10n.switchToLightMode,
+      darkThemeLabel: l10n.switchToDarkMode,
+      onShareInPlace: (currentState) async {
+        final shared = await _shareSnapshotBytes(
+          currentState.pngBytes,
+          fileName: 'singsync_snapshot_edit_${DateTime.now().millisecondsSinceEpoch}.png',
+        );
+        if (mounted && !shared) {
+          AppTopFeedback.show(context, l10n.snapshotError);
+        }
+        return false;
+      },
+      rerender: (color, shouldUseArtworkBackground, brightness) {
+        useArtworkBackground = shouldUseArtworkBackground;
+        generatedBrightness = brightness;
+        final rerenderTheme = SnapshotFlowTools.buildGenerationTheme(
+          baseTheme: theme,
+          brightness: brightness,
+        );
+        return SnapshotRenderer.buildPng(
+          SnapshotRenderRequest(
+            theme: rerenderTheme,
+            songTitle: metadata.songTitle,
+            artistName: metadata.artistName,
+            useArtworkBackground: shouldUseArtworkBackground,
+            lyricsLines: window.lines,
+            activeLineIndex: window.activeLineIndices.isEmpty ? -1 : window.activeLineIndices.first,
+            activeLineIndices: window.activeLineIndices,
+            noLyricsFallback: l10n.snapshotNoLyrics,
+            generatedWithBrand: l10n.snapshotGeneratedWithBrand,
+            artworkUrl: metadata.artworkUrl,
+            selectedColor: color,
+            preloadedArtworkImage: artworkImage,
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _showSavedSnapshotPreview({required int startIndex}) async {
@@ -1512,6 +1777,17 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                 children: [
+                                  IconButton(
+                                    onPressed: localUris.isEmpty
+                                        ? null
+                                        : () async {
+                                              final uri = localUris[currentIndex];
+                                              Navigator.of(dialogContext).pop();
+                                              await _editSavedSnapshotFromGallery(uri);
+                                            },
+                                    tooltip: 'Editar',
+                                    icon: const Icon(Icons.edit_outlined),
+                                  ),
                                   IconButton(
                                     onPressed: localUris.isEmpty
                                         ? null
@@ -1885,6 +2161,18 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                                                                 _snapshotBytesFutureByUri.remove(uri);
                                                               });
                                                               AppTopFeedback.show(this.context, l10n.snapshotDeleted);
+                                                            },
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 6),
+                                                        Material(
+                                                          color: theme.colorScheme.surface.withValues(alpha: 0.70),
+                                                          shape: const CircleBorder(),
+                                                          child: IconButton(
+                                                            icon: const Icon(Icons.edit_outlined),
+                                                            tooltip: 'Editar',
+                                                            onPressed: () async {
+                                                              await _editSavedSnapshotFromGallery(uri);
                                                             },
                                                           ),
                                                         ),

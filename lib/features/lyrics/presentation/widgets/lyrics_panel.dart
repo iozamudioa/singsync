@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../../l10n/app_localizations.dart';
 import 'app_top_feedback.dart';
+import 'snapshot_editor_support.dart';
 
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
@@ -195,82 +196,130 @@ class _LyricsPanelState extends State<LyricsPanel>
 
     _isSnapshotFlowBusy = true;
     final l10n = AppLocalizations.of(context);
-    final previewCompleter = Completer<Uint8List?>();
-    final animationFuture = _playSnapshotCaptureAnimation(
-      previewBytesFuture: previewCompleter.future,
-    );
     try {
-      await WidgetsBinding.instance.endOfFrame;
-      final pngBytes = await _buildSnapshotPng();
-      if (!previewCompleter.isCompleted) {
-        previewCompleter.complete(pngBytes);
+      final selectableLines = _buildSelectableSnapshotLines(l10n: l10n);
+      final artworkImage = await SnapshotArtworkTools.loadArtworkImage(widget.artworkUrl);
+      final extractedPalette = await SnapshotArtworkTools.extractPalette(artworkImage);
+      var selectedLineIndices = <int>{
+        _defaultSnapshotActiveLineIndex(selectableLines.length),
+      }..removeWhere((index) => index < 0 || index >= selectableLines.length);
+      if (selectedLineIndices.isEmpty && selectableLines.isNotEmpty) {
+        selectedLineIndices = <int>{0};
+      }
+      SnapshotDialogResult? dialogResult;
+
+      while (mounted) {
+        final lineSelection = await _showLineSelectionDialog(
+          lines: selectableLines,
+          initialIndexes: selectedLineIndices,
+        );
+        if (!mounted || lineSelection == null) {
+          _isSnapshotFlowBusy = false;
+          return;
+        }
+        selectedLineIndices = lineSelection;
+
+        final previewResult = await _showSnapshotPreviewDialog(
+          artworkImage: artworkImage,
+          extractedPalette: extractedPalette,
+          sourceLines: selectableLines,
+          selectedLineIndices: selectedLineIndices,
+        );
+        if (!mounted || previewResult == null) {
+          _isSnapshotFlowBusy = false;
+          return;
+        }
+        if (previewResult.action == SnapshotDialogAction.back) {
+          continue;
+        }
+
+        dialogResult = previewResult;
+        break;
       }
 
-      if (!mounted) {
+      if (!mounted || dialogResult == null) {
         _isSnapshotFlowBusy = false;
         return;
       }
-      if (pngBytes == null || pngBytes.isEmpty) {
+
+      final shouldAnimateCapture =
+          MediaQuery.of(context).orientation == Orientation.landscape;
+      if (shouldAnimateCapture) {
+        final previewCompleter = Completer<Uint8List?>();
+        final animationFuture = _playSnapshotCaptureAnimation(
+          previewBytesFuture: previewCompleter.future,
+        );
+        previewCompleter.complete(dialogResult.pngBytes);
         await animationFuture;
         if (!mounted) {
           _isSnapshotFlowBusy = false;
           return;
         }
-        _showFeedback(context, l10n.snapshotError);
-        _isSnapshotFlowBusy = false;
-        return;
-      }
-
-      await animationFuture;
-      if (!mounted) {
-        _isSnapshotFlowBusy = false;
-        return;
       }
 
       if (Platform.isAndroid) {
-        final saved = await _saveSnapshotToGallery(pngBytes);
-        if (!mounted) {
-          _isSnapshotFlowBusy = false;
-          return;
-        }
-        if (saved) {
+        final snapshotFileName = _buildSnapshotFileName();
+        if (dialogResult.action == SnapshotDialogAction.save) {
+          final saved = await _saveSnapshotToGallery(
+            dialogResult.pngBytes,
+            fileName: snapshotFileName,
+          );
+          if (!mounted) {
+            _isSnapshotFlowBusy = false;
+            return;
+          }
+          if (!saved) {
+            _showFeedback(context, l10n.snapshotError);
+            _isSnapshotFlowBusy = false;
+            return;
+          }
+
+          final metadata = SnapshotEditorMetadata(
+            songTitle: widget.songTitle,
+            artistName: widget.artistName,
+            artworkUrl: widget.artworkUrl,
+            useArtworkBackground: dialogResult.useArtworkBackground,
+            generatedThemeBrightness:
+                dialogResult.generatedBrightness == Brightness.dark ? 'dark' : 'light',
+            lyricsLines: selectableLines,
+            activeLineIndex: selectedLineIndices.isEmpty
+                ? -1
+                : selectedLineIndices.reduce(math.min),
+            activeLineIndexes: selectedLineIndices.toList()..sort(),
+            selectedColorValue: dialogResult.selectedColor?.toARGB32(),
+          );
+          await SnapshotEditorStore.saveMetadataForDisplayName(
+            displayName: snapshotFileName,
+            metadata: metadata,
+          );
           _showFeedback(context, l10n.snapshotSaved);
           await widget.onSnapshotSavedToGallery?.call();
         }
 
-        final shouldShare = await _showSnapshotPreviewDialog(pngBytes);
-        if (!mounted) {
-          _isSnapshotFlowBusy = false;
-          return;
-        }
-        if (!shouldShare) {
-          _isSnapshotFlowBusy = false;
-          return;
-        }
-
-        final shared = await _shareSnapshotViaAndroidChooser(pngBytes);
-        if (!mounted) {
-          _isSnapshotFlowBusy = false;
-          return;
-        }
-        if (shared != true) {
-          _showFeedback(context, l10n.snapshotError);
+        if (dialogResult.action == SnapshotDialogAction.share) {
+          final shared = await _shareSnapshotViaAndroidChooser(
+            dialogResult.pngBytes,
+            fileName: snapshotFileName,
+          );
+          if (!mounted) {
+            _isSnapshotFlowBusy = false;
+            return;
+          }
+          if (shared != true) {
+            _showFeedback(context, l10n.snapshotError);
+          }
         }
       } else {
         final tempDir = await getTemporaryDirectory();
         final file = File(
           '${tempDir.path}${Platform.pathSeparator}singsync_snapshot_${DateTime.now().millisecondsSinceEpoch}.png',
         );
-        await file.writeAsBytes(pngBytes, flush: true);
+        await file.writeAsBytes(dialogResult.pngBytes, flush: true);
         await Share.shareXFiles(
           [XFile(file.path)],
         );
       }
     } catch (_) {
-      if (!previewCompleter.isCompleted) {
-        previewCompleter.complete(null);
-      }
-      await animationFuture;
       if (!mounted) {
         _isSnapshotFlowBusy = false;
         return;
@@ -281,84 +330,149 @@ class _LyricsPanelState extends State<LyricsPanel>
     }
   }
 
-  Future<bool> _showSnapshotPreviewDialog(Uint8List pngBytes) async {
-    final l10n = AppLocalizations.of(context);
-    final result = await showDialog<bool>(
+  Future<Set<int>?> _showLineSelectionDialog({
+    required List<String> lines,
+    required Set<int> initialIndexes,
+  }) async {
+    return SnapshotDialogTools.showLineSelectionDialog(
       context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.transparent,
-      builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        final size = MediaQuery.of(dialogContext).size;
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => Navigator.of(dialogContext).pop(false),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
-                ),
-              ),
-              Center(
-                child: GestureDetector(
-                  onTap: () {},
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: math.min(520.0, size.width * 0.92),
-                      maxHeight: size.height * 0.84,
-                    ),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface.withValues(alpha: 0.68),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
-                        ),
-                      ),
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Flexible(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: InteractiveViewer(
-                                minScale: 1,
-                                maxScale: 3.2,
-                                child: Image.memory(
-                                  pngBytes,
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: FilledButton.icon(
-                                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                                  icon: const Icon(Icons.share_rounded),
-                                  label: Text(l10n.share),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+      lines: lines,
+      initialIndexes: initialIndexes,
+      title: 'Selecciona la letra',
+      nextLabel: 'Siguiente',
+    );
+  }
+
+  Future<SnapshotDialogResult?> _showSnapshotPreviewDialog({
+    required ui.Image? artworkImage,
+    required List<Color> extractedPalette,
+    required List<String> sourceLines,
+    required Set<int> selectedLineIndices,
+  }) async {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final themeDefaultColor = theme.brightness == Brightness.dark
+        ? theme.colorScheme.surface
+        : theme.colorScheme.surfaceContainerHighest;
+    final window = SnapshotFlowTools.buildWindowAroundSelection(
+      sourceLines: sourceLines,
+      selectedLineIndices: selectedLineIndices,
+      linesAbove: 2,
+      linesBelow: 2,
+      fallbackIndex: _defaultSnapshotActiveLineIndex(sourceLines.length),
+    );
+    final fallbackColor = await SnapshotArtworkTools.extractDominantColor(artworkImage);
+    final palette = SnapshotFlowTools.buildPaletteOptions(
+      extractedPalette: extractedPalette,
+      defaultColor: themeDefaultColor,
+      fallbackColor: fallbackColor ?? themeDefaultColor,
+      theme: theme,
+    );
+    var selectedColor = palette.first;
+    var useArtworkBackground = widget.useArtworkBackground;
+    var generatedBrightness = widget.theme.brightness;
+    final previewResult = await _buildSnapshotPng(
+      preloadedArtworkImage: artworkImage,
+      selectedColor: selectedColor,
+      useArtworkBackground: useArtworkBackground,
+      generatedBrightness: generatedBrightness,
+      lines: window.lines,
+      activeLineIndices: window.activeLineIndices,
+    );
+    if (previewResult == null || previewResult.isEmpty || !mounted) {
+      return null;
+    }
+
+    final result = await SnapshotDialogTools.showPreviewDialog(
+      context: context,
+      initialBytes: previewResult,
+      initialColor: selectedColor,
+      initialUseArtworkBackground: useArtworkBackground,
+      initialGeneratedBrightness: generatedBrightness,
+      canUseArtworkBackground: artworkImage != null,
+      palette: palette,
+      backTooltip: AppLocalizations.of(context).back,
+      saveTooltip: l10n.saveToGallery,
+      shareTooltip: l10n.share,
+      useArtworkBackgroundLabel: l10n.useArtworkBackground,
+      lightThemeLabel: l10n.switchToLightMode,
+      darkThemeLabel: l10n.switchToDarkMode,
+      onShareInPlace: (currentState) async {
+        if (Platform.isAndroid) {
+          final shared = await _shareSnapshotViaAndroidChooser(
+            currentState.pngBytes,
+            fileName: _buildSnapshotFileName(),
+          );
+          if (mounted && shared != true) {
+            _showFeedback(context, l10n.snapshotError);
+          }
+          return false;
+        }
+
+        final tempDir = await getTemporaryDirectory();
+        final file = File(
+          '${tempDir.path}${Platform.pathSeparator}singsync_snapshot_${DateTime.now().millisecondsSinceEpoch}.png',
+        );
+        await file.writeAsBytes(currentState.pngBytes, flush: true);
+        await Share.shareXFiles([XFile(file.path)]);
+        return false;
+      },
+      rerender: (color, shouldUseArtworkBackground, brightness) {
+        useArtworkBackground = shouldUseArtworkBackground;
+        generatedBrightness = brightness;
+        return _buildSnapshotPng(
+          preloadedArtworkImage: artworkImage,
+          selectedColor: color,
+          useArtworkBackground: shouldUseArtworkBackground,
+          generatedBrightness: brightness,
+          lines: window.lines,
+          activeLineIndices: window.activeLineIndices,
         );
       },
     );
-    return result == true;
+    return result;
+  }
+
+  List<String> _buildSelectableSnapshotLines({required AppLocalizations l10n}) {
+    if (_timedLines.isNotEmpty) {
+      final lines = _timedLines
+          .map((line) => line.text.trim())
+          .where((line) => line.isNotEmpty)
+          .toList(growable: false);
+      if (lines.isNotEmpty) {
+        return lines;
+      }
+    }
+
+    final plain = _toPlainLyrics(widget.lyrics).trim();
+    if (plain.isEmpty) {
+      return <String>[l10n.snapshotNoLyrics];
+    }
+
+    final lines = plain
+        .split('\n')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    return lines.isEmpty ? <String>[l10n.snapshotNoLyrics] : lines;
+  }
+
+  int _defaultSnapshotActiveLineIndex(int totalLines) {
+    if (totalLines <= 0) {
+      return -1;
+    }
+    if (_timedLines.isNotEmpty && _currentTimedLineIndex >= 0) {
+      return _currentTimedLineIndex.clamp(0, totalLines - 1).toInt();
+    }
+    if (_scrollController.hasClients && totalLines > 1) {
+      final position = _scrollController.position;
+      final maxScroll = position.maxScrollExtent;
+      if (maxScroll > 0) {
+        final ratio = (position.pixels / maxScroll).clamp(0.0, 1.0);
+        return (ratio * (totalLines - 1)).round().clamp(0, totalLines - 1);
+      }
+    }
+    return 0;
   }
 
   Future<void> _playSnapshotCaptureAnimation({
@@ -511,25 +625,31 @@ class _LyricsPanelState extends State<LyricsPanel>
     );
   }
 
-  Future<bool> _shareSnapshotViaAndroidChooser(Uint8List pngBytes) async {
-    final fileName = _buildSnapshotFileName();
+  Future<bool> _shareSnapshotViaAndroidChooser(
+    Uint8List pngBytes, {
+    String? fileName,
+  }) async {
+    final resolvedFileName = fileName ?? _buildSnapshotFileName();
     final launched = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'shareSnapshotWithSaveOption',
       {
         'bytes': pngBytes,
-        'fileName': fileName,
+        'fileName': resolvedFileName,
       },
     );
     return launched == true;
   }
 
-  Future<bool> _saveSnapshotToGallery(Uint8List pngBytes) async {
-    final fileName = _buildSnapshotFileName();
+  Future<bool> _saveSnapshotToGallery(
+    Uint8List pngBytes, {
+    String? fileName,
+  }) async {
+    final resolvedFileName = fileName ?? _buildSnapshotFileName();
     final saved = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'saveSnapshotImage',
       {
         'bytes': pngBytes,
-        'fileName': fileName,
+        'fileName': resolvedFileName,
       },
     );
     return saved == true;
@@ -546,445 +666,35 @@ class _LyricsPanelState extends State<LyricsPanel>
     return AppLocalizations.of(context).snapshotSaved;
   }
 
-  Future<Uint8List?> _buildSnapshotPng() async {
+  Future<Uint8List?> _buildSnapshotPng({
+    required List<String> lines,
+    List<int> activeLineIndices = const <int>[],
+    required Color? selectedColor,
+    required bool useArtworkBackground,
+    required Brightness generatedBrightness,
+    ui.Image? preloadedArtworkImage,
+  }) async {
     final l10n = AppLocalizations.of(context);
-    final theme = widget.theme;
-    const baseWidth = 1080.0;
-    const baseHeight = 1350.0;
-    const exportScale = 2.0;
-    final exportWidth = (baseWidth * exportScale).round();
-    final exportHeight = (baseHeight * exportScale).round();
-
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(
-      recorder,
-      Rect.fromLTWH(0, 0, exportWidth.toDouble(), exportHeight.toDouble()),
+    final generationTheme = SnapshotFlowTools.buildGenerationTheme(
+      baseTheme: widget.theme,
+      brightness: generatedBrightness,
     );
-    canvas.scale(exportScale, exportScale);
-    const rect = Rect.fromLTWH(0, 0, baseWidth, baseHeight);
-
-    final artworkImage = await _loadSnapshotArtworkImage();
-    final dominantArtworkColor = await _extractDominantArtworkColor(artworkImage);
-    final shouldUseArtworkBackground = widget.useArtworkBackground && artworkImage != null;
-    if (shouldUseArtworkBackground) {
-      paintImage(
-        canvas: canvas,
-        rect: rect,
-        image: artworkImage,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-        filterQuality: FilterQuality.high,
-        opacity: 0.30,
-      );
-      canvas.drawRect(
-        rect,
-        Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.58),
-      );
-    } else {
-      final gradientStartColor = dominantArtworkColor == null
-          ? theme.colorScheme.surface
-          : Color.lerp(theme.colorScheme.surface, dominantArtworkColor, 0.18)!;
-      final gradientEndColor = dominantArtworkColor == null
-          ? theme.colorScheme.surfaceContainerHighest
-          : Color.lerp(theme.colorScheme.surfaceContainerHighest, dominantArtworkColor, 0.10)!;
-
-      final backgroundPaint = Paint()
-        ..shader = ui.Gradient.linear(
-          const Offset(0, 0),
-          const Offset(baseWidth, baseHeight),
-          [
-            gradientStartColor,
-            gradientEndColor,
-          ],
-        );
-      canvas.drawRect(rect, backgroundPaint);
-    }
-
-    final cardRect = RRect.fromRectAndRadius(
-      const Rect.fromLTWH(70, 70, baseWidth - 140, baseHeight - 140),
-      const Radius.circular(42),
-    );
-    canvas.drawRRect(
-      cardRect,
-      Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.92),
-    );
-
-    const centerX = baseWidth / 2;
-    const vinylCenterY = 374.0;
-    const vinylRadius = 262.0;
-
-    final isDark = theme.brightness == Brightness.dark;
-    final vinylBaseColor = Color.lerp(Colors.black, theme.colorScheme.onSurface, 0.12)!;
-    final grooveColor = Color.lerp(Colors.white, theme.colorScheme.onSurface, 0.35)!;
-    final separatorColor =
-      isDark ? Colors.white.withValues(alpha: 0.78) : Colors.black.withValues(alpha: 0.68);
-    final centerLabelColor =
-      Color.lerp(theme.colorScheme.surface, theme.colorScheme.surfaceContainerHighest, 0.55)!;
-
-    canvas.drawCircle(
-      const Offset(centerX, vinylCenterY),
-      vinylRadius,
-      Paint()..color = vinylBaseColor,
-    );
-
-    for (var index = 0; index < 24; index++) {
-      final t = index / 23;
-      final radius = ui.lerpDouble(vinylRadius * 0.37, vinylRadius * 0.97, t)!;
-      final opacity = 0.12 + (0.10 * (1 - t));
-      final stroke = 0.8 + (0.35 * (1 - t));
-      canvas.drawCircle(
-        const Offset(centerX, vinylCenterY),
-        radius,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = stroke
-          ..color = grooveColor.withValues(alpha: (isDark ? 0.10 : 0.14) * (opacity / 0.14)),
-      );
-    }
-
-    final vinylRect = Rect.fromCircle(center: const Offset(centerX, vinylCenterY), radius: vinylRadius);
-    canvas.drawCircle(
-      const Offset(centerX, vinylCenterY),
-      vinylRadius,
-      Paint()
-        ..shader = ui.Gradient.linear(
-          vinylRect.topLeft,
-          vinylRect.bottomRight,
-          [
-            Colors.white.withValues(alpha: isDark ? 0.20 : 0.16),
-            Colors.white.withValues(alpha: 0.04),
-            Colors.transparent,
-            Colors.black.withValues(alpha: isDark ? 0.18 : 0.10),
-          ],
-          const [0.0, 0.24, 0.55, 1.0],
-        ),
-    );
-
-    const separatorRadius = vinylRadius * 0.56;
-    canvas.drawCircle(
-      const Offset(centerX, vinylCenterY),
-      separatorRadius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.6, (vinylRadius * 2) * 0.014)
-        ..color = separatorColor,
-    );
-
-    const artworkRadius = vinylRadius * 0.50;
-    final artworkRect = Rect.fromCircle(
-      center: const Offset(centerX, vinylCenterY),
-      radius: artworkRadius,
-    );
-    if (artworkImage != null) {
-      canvas.save();
-      canvas.clipPath(Path()..addOval(artworkRect));
-      paintImage(
-        canvas: canvas,
-        rect: artworkRect,
-        image: artworkImage,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-        filterQuality: FilterQuality.high,
-      );
-      canvas.restore();
-    } else {
-      final labelPaint = Paint()..color = centerLabelColor;
-      canvas.drawOval(artworkRect, labelPaint);
-      final logoPainter = TextPainter(
-        text: TextSpan(
-          text: 'S',
-          style: theme.textTheme.titleLarge?.copyWith(
-            color: theme.colorScheme.onSurface,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      logoPainter.paint(
-        canvas,
-        Offset(centerX - (logoPainter.width / 2), vinylCenterY - (logoPainter.height / 2)),
-      );
-    }
-
-    const centerOuterRadius = vinylRadius * 0.036;
-    canvas.drawCircle(
-      const Offset(centerX, vinylCenterY),
-      centerOuterRadius,
-      Paint()..color = theme.colorScheme.surface,
-    );
-    canvas.drawCircle(
-      const Offset(centerX, vinylCenterY),
-      vinylRadius * 0.013,
-      Paint()..color = theme.colorScheme.onSurface.withValues(alpha: 0.90),
-    );
-
-    final titleStyle = theme.textTheme.headlineSmall?.copyWith(
-      fontSize: (theme.textTheme.headlineSmall?.fontSize ?? 24) + 13,
-      fontWeight: FontWeight.w800,
-      color: theme.colorScheme.onSurface,
-    );
-    final artistStyle = theme.textTheme.titleMedium?.copyWith(
-      fontSize: (theme.textTheme.titleMedium?.fontSize ?? 16) + 3,
-      fontWeight: FontWeight.w700,
-      color: theme.colorScheme.onSurface.withValues(alpha: 0.90),
-    );
-    final lyricsStyle = theme.textTheme.bodyLarge?.copyWith(
-      fontSize: (theme.textTheme.bodyLarge?.fontSize ?? 16) + 6,
-      height: 1.45,
-      color: theme.colorScheme.onSurface,
-    );
-    final activeLyricsStyle = lyricsStyle?.copyWith(
-      fontWeight: FontWeight.w700,
-      color: theme.colorScheme.onSurface,
-    );
-
-    void drawText({
-      required String text,
-      required TextStyle? style,
-      required double top,
-      required double maxWidth,
-      int? maxLines,
-      TextAlign align = TextAlign.center,
-    }) {
-      final painter = TextPainter(
-        text: TextSpan(text: text, style: style),
-        textDirection: TextDirection.ltr,
-        maxLines: maxLines,
-        ellipsis: maxLines == null ? null : '…',
-        textAlign: align,
-      )..layout(maxWidth: maxWidth);
-      final left = align == TextAlign.center ? (baseWidth - painter.width) / 2 : 120.0;
-      painter.paint(canvas, Offset(left, top));
-    }
-
-    drawText(
-      text: widget.songTitle.trim().isEmpty ? l10n.nowPlayingDefaultTitle : widget.songTitle.trim(),
-      style: titleStyle,
-      top: 690,
-      maxWidth: 820,
-      maxLines: 2,
-    );
-    drawText(
-      text: widget.artistName.trim().isEmpty ? l10n.unknownArtist : widget.artistName.trim(),
-      style: artistStyle,
-      top: 796,
-      maxWidth: 820,
-      maxLines: 1,
-    );
-
-    final snapshotLyrics = _buildSnapshotLyricsData(l10n: l10n);
-    var currentTop = 868.0;
-    const maxBottom = 1212.0;
-    for (var lineIndex = 0; lineIndex < snapshotLyrics.lines.length; lineIndex++) {
-      final line = snapshotLyrics.lines[lineIndex];
-      final isActive = lineIndex == snapshotLyrics.activeLineIndex;
-      final lineStyle = (isActive ? activeLyricsStyle : lyricsStyle)?.copyWith(
-        fontSize: ((isActive ? activeLyricsStyle : lyricsStyle)?.fontSize ?? 18) +
-            (isActive ? 5 : 0),
-        fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-        color: isActive
-            ? theme.colorScheme.onSurface
-            : theme.colorScheme.onSurface.withValues(alpha: 0.74),
-      );
-      final linePainter = TextPainter(
-        text: TextSpan(
-          text: line,
-          style: lineStyle,
-        ),
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-        ellipsis: '…',
-        textAlign: TextAlign.center,
-      )..layout(maxWidth: 820);
-      if (currentTop + linePainter.height > maxBottom) {
-        break;
-      }
-      linePainter.paint(canvas, Offset((baseWidth - linePainter.width) / 2, currentTop));
-      currentTop += linePainter.height + 10;
-    }
-
-    final footerPainter = TextPainter(
-      text: TextSpan(
-        text: l10n.snapshotGeneratedWithBrand,
-        style: theme.textTheme.labelLarge?.copyWith(
-          fontSize: (theme.textTheme.labelLarge?.fontSize ?? 14) + 2,
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.58),
-          fontWeight: FontWeight.w600,
-        ),
+    return SnapshotRenderer.buildPng(
+      SnapshotRenderRequest(
+        theme: generationTheme,
+        songTitle: widget.songTitle.trim().isEmpty ? l10n.nowPlayingDefaultTitle : widget.songTitle,
+        artistName: widget.artistName.trim().isEmpty ? l10n.unknownArtist : widget.artistName,
+        useArtworkBackground: useArtworkBackground,
+        lyricsLines: lines,
+        activeLineIndex: activeLineIndices.isEmpty ? -1 : activeLineIndices.first,
+        activeLineIndices: activeLineIndices,
+        noLyricsFallback: l10n.snapshotNoLyrics,
+        generatedWithBrand: l10n.snapshotGeneratedWithBrand,
+        artworkUrl: widget.artworkUrl,
+        selectedColor: selectedColor,
+        preloadedArtworkImage: preloadedArtworkImage,
       ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    footerPainter.paint(canvas, Offset((baseWidth - footerPainter.width) / 2, baseHeight - 112));
-
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(exportWidth, exportHeight);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    return byteData?.buffer.asUint8List();
-  }
-
-  Future<Color?> _extractDominantArtworkColor(ui.Image? artworkImage) async {
-    if (artworkImage == null) {
-      return null;
-    }
-
-    try {
-      final byteData = await artworkImage.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (byteData == null) {
-        return null;
-      }
-
-      final bytes = byteData.buffer.asUint8List();
-      final width = artworkImage.width;
-      final height = artworkImage.height;
-      final stepX = math.max(1, width ~/ 36);
-      final stepY = math.max(1, height ~/ 36);
-
-      var totalRed = 0;
-      var totalGreen = 0;
-      var totalBlue = 0;
-      var totalWeight = 0;
-
-      for (var y = 0; y < height; y += stepY) {
-        for (var x = 0; x < width; x += stepX) {
-          final index = ((y * width) + x) * 4;
-          if (index + 3 >= bytes.length) {
-            continue;
-          }
-
-          final red = bytes[index];
-          final green = bytes[index + 1];
-          final blue = bytes[index + 2];
-          final alpha = bytes[index + 3];
-
-          if (alpha < 24) {
-            continue;
-          }
-
-          final weight = alpha;
-          totalRed += red * weight;
-          totalGreen += green * weight;
-          totalBlue += blue * weight;
-          totalWeight += weight;
-        }
-      }
-
-      if (totalWeight == 0) {
-        return null;
-      }
-
-      final averagedColor = Color.fromARGB(
-        255,
-        (totalRed / totalWeight).round().clamp(0, 255),
-        (totalGreen / totalWeight).round().clamp(0, 255),
-        (totalBlue / totalWeight).round().clamp(0, 255),
-      );
-
-      final hsl = HSLColor.fromColor(averagedColor);
-      final saturation = (hsl.saturation * 0.78).clamp(0.20, 0.65).toDouble();
-      final lightness = hsl.lightness.clamp(0.22, 0.62).toDouble();
-      return hsl.withSaturation(saturation).withLightness(lightness).toColor();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<ui.Image?> _loadSnapshotArtworkImage() async {
-    final artworkUrl = widget.artworkUrl?.trim();
-    if (artworkUrl == null || artworkUrl.isEmpty) {
-      return null;
-    }
-    try {
-      final uri = Uri.tryParse(artworkUrl);
-      if (uri == null) {
-        return null;
-      }
-      final bytes = uri.scheme.toLowerCase() == 'file'
-          ? await File.fromUri(uri).readAsBytes()
-          : (await NetworkAssetBundle(uri).load(artworkUrl)).buffer.asUint8List();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      return frame.image;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  _SnapshotLyricsData _buildSnapshotLyricsData({required AppLocalizations l10n}) {
-    if (_timedLines.isNotEmpty) {
-      final rawActiveIndex = _currentTimedLineIndex
-          .clamp(0, math.max(_timedLines.length - 1, 0))
-          .toInt();
-      final lines = _timedLines
-          .map((line) => line.text.trim())
-          .where((line) => line.isNotEmpty)
-          .toList();
-      if (lines.isNotEmpty) {
-        final window = _buildSnapshotWindow(
-          sourceLines: lines,
-          centerIndex: rawActiveIndex,
-          linesAbove: 2,
-          linesBelow: 2,
-        );
-        return _SnapshotLyricsData(lines: window.lines, activeLineIndex: window.activeLineIndex);
-      }
-    }
-
-    final plain = _toPlainLyrics(widget.lyrics).trim();
-    if (plain.isEmpty) {
-      return _SnapshotLyricsData(lines: [l10n.snapshotNoLyrics], activeLineIndex: -1);
-    }
-
-    final lines = plain
-        .split('\n')
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toList();
-    if (lines.isEmpty) {
-      return _SnapshotLyricsData(lines: [l10n.snapshotNoLyrics], activeLineIndex: -1);
-    }
-    var centerIndex = 0;
-    if (_scrollController.hasClients && lines.length > 1) {
-      final position = _scrollController.position;
-      final maxScroll = position.maxScrollExtent;
-      if (maxScroll > 0) {
-        final ratio = (position.pixels / maxScroll).clamp(0.0, 1.0);
-        centerIndex = (ratio * (lines.length - 1)).round().clamp(0, lines.length - 1);
-      }
-    }
-
-    final window = _buildSnapshotWindow(
-      sourceLines: lines,
-      centerIndex: centerIndex,
-      linesAbove: 2,
-      linesBelow: 2,
     );
-    return _SnapshotLyricsData(lines: window.lines, activeLineIndex: -1);
-  }
-
-  _SnapshotLyricsData _buildSnapshotWindow({
-    required List<String> sourceLines,
-    required int centerIndex,
-    required int linesAbove,
-    required int linesBelow,
-  }) {
-    if (sourceLines.isEmpty) {
-      return const _SnapshotLyricsData(lines: <String>[], activeLineIndex: -1);
-    }
-
-    var start = (centerIndex - linesAbove).clamp(0, sourceLines.length - 1);
-    var end = (centerIndex + linesBelow).clamp(0, sourceLines.length - 1);
-
-    const targetSize = 5;
-    while ((end - start + 1) < targetSize && start > 0) {
-      start -= 1;
-    }
-    while ((end - start + 1) < targetSize && end < sourceLines.length - 1) {
-      end += 1;
-    }
-
-    final windowLines = sourceLines.sublist(start, end + 1);
-    final activeIndex = (centerIndex - start).clamp(0, windowLines.length - 1);
-    return _SnapshotLyricsData(lines: windowLines, activeLineIndex: activeIndex);
   }
 
   Future<void> _associateLyrics(BuildContext context) async {
@@ -1351,9 +1061,4 @@ class _TimedLyricLine {
   final String text;
 }
 
-class _SnapshotLyricsData {
-  const _SnapshotLyricsData({required this.lines, required this.activeLineIndex});
 
-  final List<String> lines;
-  final int activeLineIndex;
-}

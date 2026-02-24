@@ -189,13 +189,14 @@ class MainActivity: FlutterActivity() {
 				"saveSnapshotImage" -> {
 					val bytes = call.argument<ByteArray>("bytes")
 					val fileName = call.argument<String>("fileName").orEmpty()
+					val replaceUri = call.argument<String>("replaceUri").orEmpty()
 					if (bytes == null || bytes.isEmpty()) {
 						result.success(false)
 						return@setMethodCallHandler
 					}
 
 					Thread {
-						val saved = saveSnapshotImage(bytes, fileName)
+						val saved = saveSnapshotImage(bytes, fileName, replaceUri)
 						runOnUiThread {
 							result.success(saved)
 						}
@@ -456,7 +457,7 @@ class MainActivity: FlutterActivity() {
 		}
 	}
 
-	private fun saveSnapshotImage(bytes: ByteArray, fileName: String): Boolean {
+	private fun saveSnapshotImage(bytes: ByteArray, fileName: String, replaceUriRaw: String): Boolean {
 		val safeName = if (fileName.isBlank()) {
 			"singsync_snapshot_${System.currentTimeMillis()}.png"
 		} else {
@@ -464,6 +465,24 @@ class MainActivity: FlutterActivity() {
 		}
 
 		val resolver = contentResolver
+		val replaceUri = Uri.parse(replaceUriRaw)
+		if (replaceUriRaw.isNotBlank()) {
+			try {
+				resolver.openOutputStream(replaceUri, "w")?.use { stream ->
+					stream.write(bytes)
+				} ?: return false
+
+				val updateValues = ContentValues().apply {
+					put(MediaStore.Images.Media.DISPLAY_NAME, safeName)
+					put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+				}
+				resolver.update(replaceUri, updateValues, null, null)
+				return true
+			} catch (_: Throwable) {
+				// fall back to insert if overwrite fails for any reason
+			}
+		}
+
 		val values = ContentValues().apply {
 			put(MediaStore.Images.Media.DISPLAY_NAME, safeName)
 			put(MediaStore.Images.Media.MIME_TYPE, "image/png")
