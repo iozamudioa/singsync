@@ -1,3 +1,8 @@
+param(
+  [ValidateSet('dev', 'pro')]
+  [string]$Profile = 'dev'
+)
+
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -13,10 +18,12 @@ function Assert-LastExitCode([string]$stepLabel) {
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $projectRoot
 
-$packageName = 'net.iozamudioa.lyric_notifier'
+$packageName = 'net.iozamudioa.singsync'
 $pubspecPath = Join-Path $projectRoot 'pubspec.yaml'
-$apkPath = Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-release.apk'
 $artifactsDir = Join-Path $projectRoot 'build\artifacts'
+
+$buildMode = 'release'
+$apkPath = Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-release.apk'
 
 if (-not (Test-Path $pubspecPath)) {
   throw "No se encontró pubspec.yaml en: $pubspecPath"
@@ -42,10 +49,10 @@ Assert-LastExitCode '[A/6] flutter analyze'
 $buildTimestampUtc = (Get-Date).ToUniversalTime()
 $buildTimestampCompact = $buildTimestampUtc.ToString('yyyyMMdd-HHmmss')
 
-Write-Host "[B/6] Compilando APK release..." -ForegroundColor Cyan
+Write-Host "[B/6] Compilando APK $buildMode (perfil=$Profile)..." -ForegroundColor Cyan
 Write-Host "Build timestamp (UTC): $($buildTimestampUtc.ToString('yyyy-MM-dd HH:mm:ss'))"
-flutter build apk --release
-Assert-LastExitCode '[B/6] flutter build apk --release'
+flutter build apk --$buildMode --dart-define=APP_PROFILE=$Profile
+Assert-LastExitCode "[B/6] flutter build apk --$buildMode"
 
 if (-not (Test-Path $apkPath)) {
   throw "No se encontró el APK generado en: $apkPath"
@@ -55,7 +62,7 @@ if (-not (Test-Path $artifactsDir)) {
   New-Item -ItemType Directory -Path $artifactsDir | Out-Null
 }
 
-$artifactApkPath = Join-Path $artifactsDir "app-release-$buildTimestampCompact.apk"
+$artifactApkPath = Join-Path $artifactsDir "app-$Profile-$buildMode-$buildTimestampCompact.apk"
 Copy-Item -Path $apkPath -Destination $artifactApkPath -Force
 
 Write-Host "[C/6] Verificando dispositivo ADB..." -ForegroundColor Cyan
@@ -75,11 +82,38 @@ if (-not $connected) {
   throw 'No hay dispositivos ADB conectados (estado device).'
 }
 
+Write-Host "[C.5/6] Verificando variante instalada (debug/release)..." -ForegroundColor Cyan
+$installedDump = adb shell dumpsys package $packageName | Out-String
+Assert-LastExitCode '[C.5/6] adb shell dumpsys package (pre-install)'
+
+$isInstalled = $installedDump -match 'versionName='
+if ($isInstalled) {
+  $installedIsDebug = $installedDump -match '\bDEBUGGABLE\b'
+  $targetIsDebug = $buildMode -eq 'debug'
+
+  if ($installedIsDebug -ne $targetIsDebug) {
+    $installedVariant = if ($installedIsDebug) { 'debug' } else { 'release' }
+    Write-Host "Se detectó variante instalada '$installedVariant' y se compilará '$buildMode'. Desinstalando versión previa..." -ForegroundColor Yellow
+    adb uninstall $packageName | Out-Null
+    Assert-LastExitCode '[C.5/6] adb uninstall (mismatch debug/release)'
+  }
+}
+
 Write-Host "[D/6] Instalando APK con -r..." -ForegroundColor Cyan
 $installOutput = adb install -r "$artifactApkPath" | Out-String
-Assert-LastExitCode '[D/6] adb install -r'
-if ($installOutput -notmatch 'Success') {
-  throw "Instalación falló. Salida:`n$installOutput"
+if ($LASTEXITCODE -ne 0 -or $installOutput -notmatch 'Success') {
+  if ($installOutput -match 'INSTALL_FAILED_UPDATE_INCOMPATIBLE') {
+    Write-Host "adb install reportó INSTALL_FAILED_UPDATE_INCOMPATIBLE. Desinstalando y reintentando instalación..." -ForegroundColor Yellow
+    adb uninstall $packageName | Out-Null
+    Assert-LastExitCode '[D/6] adb uninstall (retry by INSTALL_FAILED_UPDATE_INCOMPATIBLE)'
+
+    $installOutput = adb install -r "$artifactApkPath" | Out-String
+    if ($LASTEXITCODE -ne 0 -or $installOutput -notmatch 'Success') {
+      throw "Instalación falló tras retry. Salida:`n$installOutput"
+    }
+  } else {
+    throw "Instalación falló. Salida:`n$installOutput"
+  }
 }
 
 Write-Host "[E/6] Validando versión y timestamp instalados..." -ForegroundColor Cyan
@@ -127,6 +161,8 @@ adb shell monkey -p $packageName -c android.intent.category.LAUNCHER 1 | Out-Nul
 Assert-LastExitCode '[F/6] adb shell monkey'
 
 Write-Host "OK: analyze, build, install (-r), validación y launch completados." -ForegroundColor Green
+Write-Host "Perfil: $Profile"
+Write-Host "Build mode: $buildMode"
 Write-Host "Paquete: $packageName"
 Write-Host "Versión: $installedVersionName+$installedVersionCode"
 Write-Host "Build timestamp (UTC): $($buildTimestampUtc.ToString('yyyy-MM-dd HH:mm:ss'))"

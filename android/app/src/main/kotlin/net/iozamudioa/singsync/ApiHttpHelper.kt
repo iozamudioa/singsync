@@ -1,4 +1,4 @@
-package net.iozamudioa.lyric_notifier
+package net.iozamudioa.singsync
 
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,7 +19,7 @@ class ApiHttpHelper(
     private val connectTimeoutMs: Int = 20_000,
     private val readTimeoutMs: Int = 25_000,
     private val userAgent: String =
-        "SingSync v1.0.0 (https://github.com/irvin/lyric_notifier)",
+        "SingSync v1.0.0 (https://github.com/iozamudioa/singsync)",
 ) {
     fun getWithRetry(
         url: String,

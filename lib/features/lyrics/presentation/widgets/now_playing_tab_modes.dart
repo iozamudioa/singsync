@@ -105,11 +105,9 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
           Center(
             child: Transform.translate(
               offset: Offset(landscapeOpticalDx, 0),
-              child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 360),
-                curve: Curves.easeOutCubic,
-                tween: Tween(begin: 0, end: 1),
-                builder: (context, progress, _) {
+              child: Builder(
+                builder: (context) {
+                  const progress = 1.0;
                   final animatedSize = ui.lerpDouble(collapsedSizeEstimate, size, progress)!;
 
                   if (!isLandscape) {
@@ -124,6 +122,7 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                               children: [
                                 _ArtworkCover(
                                   url: artworkUrl,
+                                  trackTitle: controller.songTitle,
                                   size: animatedSize,
                                   isSpinning: controller.isNowPlayingPlaybackActive,
                                   spinAnimation: _vinylSpinController,
@@ -187,6 +186,7 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
                         Center(
                           child: _ArtworkCover(
                             url: artworkUrl,
+                            trackTitle: controller.songTitle,
                             size: landscapeAnimatedSize,
                             isSpinning: controller.isNowPlayingPlaybackActive,
                             spinAnimation: _vinylSpinController,

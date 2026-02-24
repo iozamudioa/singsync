@@ -5,7 +5,7 @@ import '../domain/music_metadata_search_port.dart';
 
 class PlatformMusicMetadataSearchAdapter implements MusicMetadataSearchPort {
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/lyrics',
+    'net.iozamudioa.singsync/lyrics',
   );
 
   @override

@@ -9,14 +9,14 @@ import '../features/lyrics/presentation/lyrics_home_screen.dart';
 import '../l10n/app_localizations.dart';
 import 'theme_controller.dart';
 
-class LyricNotifierApp extends StatefulWidget {
-  const LyricNotifierApp({super.key});
+class SingSyncApp extends StatefulWidget {
+  const SingSyncApp({super.key});
 
   @override
-  State<LyricNotifierApp> createState() => _LyricNotifierAppState();
+  State<SingSyncApp> createState() => _SingSyncAppState();
 }
 
-class _LyricNotifierAppState extends State<LyricNotifierApp> {
+class _SingSyncAppState extends State<SingSyncApp> {
   late final ThemeController _themeController;
   late final LyricsController _lyricsController;
   late final LocalSongCacheRepository _songCacheRepository;

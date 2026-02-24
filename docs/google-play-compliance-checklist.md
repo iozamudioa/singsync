@@ -12,7 +12,7 @@ Checklist práctico para publicar SingSync en Google Play con foco en:
 ## 1) Pre-flight (bloqueantes)
 
 - [x] Verificar que el paquete a publicar sea el final (`applicationId`, nombre app, icono).
-  - Verificado en build/config: `applicationId=net.iozamudioa.lyric_notifier`, label `SingSync`, icon `@mipmap/ic_launcher`.
+  - Verificado en build/config: `applicationId=net.iozamudioa.singsync`, label `SingSync`, icon `@mipmap/ic_launcher`.
 - [x] Confirmar `targetSdk` y requisitos vigentes de Play Console.
   - Verificado en APK release reciente: `targetSdkVersion=36`, `sdkVersion(min)=24`, `compileSdkVersion=36`.
   - Estado: OK para requisito actual de Play (mantener revisión en cada nueva policy window).

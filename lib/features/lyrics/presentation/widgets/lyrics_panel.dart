@@ -54,7 +54,7 @@ class _LyricsPanelState extends State<LyricsPanel>
   with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const Size _snapshotPreviewBaseSize = Size(190, 238);
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/lyrics',
+    'net.iozamudioa.singsync/lyrics',
   );
 
   final GlobalKey _panelStackKey = GlobalKey();
@@ -898,8 +898,9 @@ class _LyricsPanelState extends State<LyricsPanel>
       if (uri == null) {
         return null;
       }
-      final data = await NetworkAssetBundle(uri).load(artworkUrl);
-      final bytes = data.buffer.asUint8List();
+      final bytes = uri.scheme.toLowerCase() == 'file'
+          ? await File.fromUri(uri).readAsBytes()
+          : (await NetworkAssetBundle(uri).load(artworkUrl)).buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       return frame.image;

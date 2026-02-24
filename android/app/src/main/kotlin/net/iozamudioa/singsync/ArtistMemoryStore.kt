@@ -1,4 +1,4 @@
-package net.iozamudioa.lyric_notifier
+package net.iozamudioa.singsync
 
 import android.content.ContentValues
 import android.content.Context

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
@@ -29,11 +31,13 @@ class LyricsHomeScreen extends StatefulWidget {
 
 class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBindingObserver {
   static const String _useArtworkBackgroundPrefKey = 'use_artwork_background';
+  static const String _appProfile = String.fromEnvironment('APP_PROFILE', defaultValue: 'dev');
+  static final bool _isDevProfile = _appProfile.trim().toLowerCase() == 'dev';
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/lyrics',
+    'net.iozamudioa.singsync/lyrics',
   );
   static const MethodChannel _nowPlayingMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/now_playing_methods',
+    'net.iozamudioa.singsync/now_playing_methods',
   );
   bool _isPermissionDialogOpen = false;
   bool _hideHomeHeaderForExpandedVinyl = false;
@@ -67,6 +71,20 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
 
   bool get _isSleepTimerActive => _sleepTimerEndsAt != null || _sleepSongsRemaining != null;
 
+  ImageProvider<Object>? _buildArtworkImageProvider(String? rawUrl) {
+    final artworkUrl = rawUrl?.trim() ?? '';
+    if (artworkUrl.isEmpty) {
+      return null;
+    }
+
+    final uri = Uri.tryParse(artworkUrl);
+    if (uri != null && uri.scheme.toLowerCase() == 'file') {
+      return FileImage(File.fromUri(uri));
+    }
+
+    return NetworkImage(artworkUrl);
+  }
+
   Future<void> _handleSnapshotSavedToGallery() async {
     await _loadSavedSnapshots(force: true);
   }
@@ -77,16 +95,14 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     }
 
     final songTitle = widget.controller.songTitle.trim();
-    final artistName = widget.controller.artistName.trim();
-    final sourcePackage = (widget.controller.nowPlayingSourcePackage ?? '').trim();
-    final isMeaningfulTrack = songTitle.isNotEmpty &&
-        songTitle != AppLocalizations.of(context).nowPlayingDefaultTitle &&
-        artistName.isNotEmpty;
-    if (!isMeaningfulTrack || sourcePackage.isEmpty) {
+    final defaultTitle = AppLocalizations.of(context).nowPlayingDefaultTitle;
+    final isMeaningfulTrack =
+        songTitle.isNotEmpty && songTitle.toLowerCase() != defaultTitle.toLowerCase();
+    if (!isMeaningfulTrack) {
       return;
     }
 
-    final currentTrackKey = '$songTitle|$artistName|$sourcePackage'.toLowerCase();
+    final currentTrackKey = songTitle.toLowerCase();
     if (_sleepTimerLastTrackKey.isEmpty) {
       _sleepTimerLastTrackKey = currentTrackKey;
       return;
@@ -173,12 +189,91 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                     _openInfoModalAction?.call();
                   },
                 ),
+                if (_isDevProfile)
+                  ListTile(
+                    leading: const Icon(Icons.bug_report_outlined),
+                    title: const Text('Debug (perfil dev)'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      _showDebugProfileSubmenu();
+                    },
+                  ),
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  Future<void> _showDebugProfileSubmenu() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        return SafeArea(
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface.withValues(alpha: 0.68),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.content_copy_rounded),
+                  title: const Text('Capturar JSON de MediaSession'),
+                  subtitle: const Text('Copiar JSON completo al portapapeles'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    unawaited(_copyActiveSessionSnapshotToClipboard());
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _copyActiveSessionSnapshotToClipboard() async {
+    try {
+      final response = await _nowPlayingMethodsChannel.invokeMethod<dynamic>(
+        'getActiveSessionSnapshot',
+        <String, dynamic>{
+          'sourcePackage': widget.controller.nowPlayingSourcePackage,
+        },
+      );
+
+      if (response is! Map) {
+        if (!mounted) {
+          return;
+        }
+        AppTopFeedback.show(context, 'No hay snapshot de MediaSession activo');
+        return;
+      }
+
+      final normalized = response.map((key, value) => MapEntry(key.toString(), value));
+      final jsonText = const JsonEncoder.withIndent('  ').convert(normalized);
+      await Clipboard.setData(ClipboardData(text: jsonText));
+
+      if (!mounted) {
+        return;
+      }
+      AppTopFeedback.show(context, 'Snapshot JSON copiado al portapapeles');
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      AppTopFeedback.show(context, 'Error al capturar snapshot de MediaSession');
+    }
   }
 
   Future<void> _triggerSleepTimerStop() async {
@@ -273,8 +368,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       return;
     }
     _sleepTimerTicker?.cancel();
-    final currentTrackKey = '${widget.controller.songTitle.trim()}|${widget.controller.artistName.trim()}|'
-        '${(widget.controller.nowPlayingSourcePackage ?? '').trim()}'.toLowerCase();
+    final currentTrackKey = widget.controller.songTitle.trim().toLowerCase();
     if (mounted) {
       setState(() {
         _sleepTimerEndsAt = null;
@@ -302,7 +396,10 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     }
     if (_sleepSongsRemaining != null) {
       final n = _sleepSongsRemaining!;
-      return l10n.sleepTimerStatusAfterSongs(n);
+      if (n <= 1) {
+        return 'Última canción, se apagará el reproductor';
+      }
+      return 'Apagado después de $n canciones';
     }
     return l10n.sleepTimerStatusNone;
   }
@@ -982,14 +1079,14 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                       child: ListTile(
                         leading: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: (item.artworkUrl ?? '').trim().isEmpty
+                          child: _buildArtworkImageProvider(item.artworkUrl) == null
                               ? const SizedBox(
                                   width: 42,
                                   height: 42,
                                   child: ColoredBox(color: Colors.black12),
                                 )
-                              : Image.network(
-                                  item.artworkUrl!,
+                              : Image(
+                                  image: _buildArtworkImageProvider(item.artworkUrl)!,
                                   width: 42,
                                   height: 42,
                                   fit: BoxFit.cover,
@@ -2094,6 +2191,9 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         final theme = Theme.of(context);
         final l10n = AppLocalizations.of(context);
         final artworkUrl = widget.controller.nowPlayingArtworkUrl;
+        final artworkProvider = _buildArtworkImageProvider(artworkUrl);
+        final backgroundTransitionKey =
+            '${widget.controller.songTitle.trim()}|${(artworkUrl ?? '').trim()}';
         _syncWakeLockWithPlayback(
           shouldKeepAwake: widget.controller.isNowPlayingPlaybackActive,
         );
@@ -2145,34 +2245,54 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                 ),
           body: Stack(
             children: [
-              if (_useArtworkBackground && (artworkUrl ?? '').isNotEmpty)
+              if (_useArtworkBackground && artworkProvider != null)
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: Opacity(
-                            opacity: 0.30,
-                            child: ClipRect(
-                              child: ImageFiltered(
-                                imageFilter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-                                child: Image.network(
-                                  artworkUrl!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 560),
+                      switchInCurve: Curves.easeInOut,
+                      switchOutCurve: Curves.easeInOut,
+                      layoutBuilder: (currentChild, previousChildren) {
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ...previousChildren,
+                            if (currentChild != null) currentChild,
+                          ],
+                        );
+                      },
+                      transitionBuilder: (child, animation) =>
+                          FadeTransition(opacity: animation, child: child),
+                      child: SizedBox.expand(
+                        key: ValueKey(backgroundTransitionKey),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: Opacity(
+                                opacity: 0.30,
+                                child: ClipRect(
+                                  child: ImageFiltered(
+                                    imageFilter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                                    child: Image(
+                                      image: artworkProvider,
+                                      fit: BoxFit.cover,
+                                      gaplessPlayback: true,
+                                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                        Positioned.fill(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surface.withValues(alpha: 0.58),
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surface.withValues(alpha: 0.58),
+                                ),
+                              ),
                             ),
-                          ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),

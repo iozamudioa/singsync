@@ -79,10 +79,10 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
   static const int _dragSeekMinPositionDeltaMs = 500;
   static const int _dragSeekHapticIntervalMs = 180;
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/lyrics',
+    'net.iozamudioa.singsync/lyrics',
   );
   static const MethodChannel _nowPlayingMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/now_playing_methods',
+    'net.iozamudioa.singsync/now_playing_methods',
   );
   final Map<String, Future<Uint8List?>> _playerIconFutureByPackage = <String, Future<Uint8List?>>{};
   Timer? _autoExpandVinylTimer;
@@ -762,8 +762,9 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
       if (uri == null) {
         return null;
       }
-      final data = await NetworkAssetBundle(uri).load(artworkUrl);
-      final bytes = data.buffer.asUint8List();
+      final bytes = uri.scheme.toLowerCase() == 'file'
+          ? await File.fromUri(uri).readAsBytes()
+          : (await NetworkAssetBundle(uri).load(artworkUrl)).buffer.asUint8List();
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       return frame.image;
@@ -1025,6 +1026,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                                 url: controller.isAdLikeNowPlaying
                                                     ? null
                                                     : controller.nowPlayingArtworkUrl,
+                                                trackTitle: controller.songTitle,
                                                 size: artworkSize,
                                                 isSpinning: controller.isNowPlayingPlaybackActive,
                                                 spinAnimation: _vinylSpinController,
@@ -1152,6 +1154,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                           url: controller.isAdLikeNowPlaying
                                               ? null
                                               : controller.nowPlayingArtworkUrl,
+                                          trackTitle: controller.songTitle,
                                           size: responsiveSize,
                                           isSpinning: controller.isNowPlayingPlaybackActive,
                                           spinAnimation: _vinylSpinController,

@@ -5,13 +5,13 @@ import '../domain/lyrics_lookup_result.dart';
 
 class PlatformLyricsGateway {
   static const EventChannel _nowPlayingChannel = EventChannel(
-    'net.iozamudioa.lyric_notifier/now_playing',
+    'net.iozamudioa.singsync/now_playing',
   );
   static const MethodChannel _nowPlayingMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/now_playing_methods',
+    'net.iozamudioa.singsync/now_playing_methods',
   );
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
-    'net.iozamudioa.lyric_notifier/lyrics',
+    'net.iozamudioa.singsync/lyrics',
   );
 
   Stream<dynamic> nowPlayingStream() {
@@ -98,6 +98,21 @@ class PlatformLyricsGateway {
   Future<Map<String, dynamic>?> getMediaPlaybackState({String? sourcePackage}) async {
     final response = await _nowPlayingMethodsChannel.invokeMethod<dynamic>(
       'getMediaPlaybackState',
+      {
+        'sourcePackage': sourcePackage,
+      },
+    );
+
+    if (response is! Map) {
+      return null;
+    }
+
+    return response.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  Future<Map<String, dynamic>?> getActiveSessionSnapshot({String? sourcePackage}) async {
+    final response = await _nowPlayingMethodsChannel.invokeMethod<dynamic>(
+      'getActiveSessionSnapshot',
       {
         'sourcePackage': sourcePackage,
       },

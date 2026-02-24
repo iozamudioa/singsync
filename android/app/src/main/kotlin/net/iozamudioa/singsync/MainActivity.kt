@@ -1,4 +1,4 @@
-package net.iozamudioa.lyric_notifier
+package net.iozamudioa.singsync
 
 import android.content.ContentValues
 import android.content.ContentUris
@@ -47,6 +47,12 @@ class MainActivity: FlutterActivity() {
 			NOW_PLAYING_METHODS_CHANNEL,
 		).setMethodCallHandler { call, result ->
 			when (call.method) {
+				"getActiveSessionSnapshot" -> {
+					val sourcePackage = call.argument<String>("sourcePackage")
+					result.success(
+						PixelNowPlayingNotificationListener.getActiveSessionSnapshot(sourcePackage),
+					)
+				}
 				"getCurrentNowPlaying" -> {
 					val payload = PixelNowPlayingNotificationListener.getCurrentNowPlaying()
 					result.success(payload)
@@ -526,8 +532,8 @@ class MainActivity: FlutterActivity() {
 	}
 
 	companion object {
-		const val NOW_PLAYING_CHANNEL = "net.iozamudioa.lyric_notifier/now_playing"
-		const val NOW_PLAYING_METHODS_CHANNEL = "net.iozamudioa.lyric_notifier/now_playing_methods"
-		const val LYRICS_CHANNEL = "net.iozamudioa.lyric_notifier/lyrics"
+		const val NOW_PLAYING_CHANNEL = "net.iozamudioa.singsync/now_playing"
+		const val NOW_PLAYING_METHODS_CHANNEL = "net.iozamudioa.singsync/now_playing_methods"
+		const val LYRICS_CHANNEL = "net.iozamudioa.singsync/lyrics"
 	}
 }

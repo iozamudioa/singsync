@@ -356,6 +356,7 @@ class _CandidatesList extends StatelessWidget {
 class _ArtworkCover extends StatelessWidget {
   const _ArtworkCover({
     required this.url,
+    required this.trackTitle,
     required this.spinAnimation,
     required this.seekOffsetTurns,
     required this.seekCarryTurns,
@@ -371,6 +372,7 @@ class _ArtworkCover extends StatelessWidget {
   });
 
   final String? url;
+  final String trackTitle;
   final Animation<double> spinAnimation;
   final Animation<double> seekOffsetTurns;
   final double seekCarryTurns;
@@ -387,6 +389,8 @@ class _ArtworkCover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final artworkUrl = (url ?? '').trim();
+    final artworkUri = Uri.tryParse(artworkUrl);
     final isDark = theme.brightness == Brightness.dark;
     final vinylBaseColor = Color.lerp(Colors.black, theme.colorScheme.onSurface, 0.12)!;
     final grooveColor = Color.lerp(Colors.white, theme.colorScheme.onSurface, 0.35)!
@@ -397,6 +401,7 @@ class _ArtworkCover extends StatelessWidget {
         Color.lerp(theme.colorScheme.surface, theme.colorScheme.surfaceContainerHighest, 0.55)!;
     final centerArtworkSize = size * 0.50;
     final separatorOuterSize = size * 0.56;
+    final artworkTransitionKey = '${trackTitle.trim()}|$artworkUrl';
 
     return Center(
       child: Material(
@@ -469,46 +474,84 @@ class _ArtworkCover extends StatelessWidget {
                     ),
                   ),
                   ClipOval(
-                    child: (url ?? '').trim().isNotEmpty
-                        ? Transform.rotate(
-                            angle: 0,
-                            child: Image.network(
-                              url!,
-                              width: centerArtworkSize,
-                              height: centerArtworkSize,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) {
-                                return ClipOval(
-                                  child: Image.asset(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 560),
+                      switchInCurve: Curves.easeInOut,
+                      switchOutCurve: Curves.easeInOut,
+                      layoutBuilder: (currentChild, previousChildren) {
+                        return Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            ...previousChildren,
+                            if (currentChild != null) currentChild,
+                          ],
+                        );
+                      },
+                      transitionBuilder: (child, animation) =>
+                          FadeTransition(opacity: animation, child: child),
+                      child: SizedBox(
+                        key: ValueKey(artworkTransitionKey),
+                        width: centerArtworkSize,
+                        height: centerArtworkSize,
+                        child: artworkUrl.isNotEmpty
+                            ? Transform.rotate(
+                                angle: 0,
+                                child:
+                                    (artworkUri != null && artworkUri.scheme.toLowerCase() == 'file')
+                                    ? Image.file(
+                                        File.fromUri(artworkUri),
+                                        width: centerArtworkSize,
+                                        height: centerArtworkSize,
+                                        fit: BoxFit.cover,
+                                        gaplessPlayback: true,
+                                        errorBuilder: (_, __, ___) {
+                                          return Image.asset(
+                                            'assets/app_icon/singsync.png',
+                                            width: centerArtworkSize,
+                                            height: centerArtworkSize,
+                                            fit: BoxFit.cover,
+                                            gaplessPlayback: true,
+                                          );
+                                        },
+                                      )
+                                    : Image.network(
+                                        artworkUrl,
+                                        width: centerArtworkSize,
+                                        height: centerArtworkSize,
+                                        fit: BoxFit.cover,
+                                        gaplessPlayback: true,
+                                        errorBuilder: (_, __, ___) {
+                                          return Image.asset(
+                                            'assets/app_icon/singsync.png',
+                                            width: centerArtworkSize,
+                                            height: centerArtworkSize,
+                                            fit: BoxFit.cover,
+                                            gaplessPlayback: true,
+                                          );
+                                        },
+                                      ),
+                              )
+                            : centerIcon != null
+                                ? Container(
+                                    width: centerArtworkSize,
+                                    height: centerArtworkSize,
+                                    color: centerLabelColor,
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      centerIcon,
+                                      size: size * 0.26,
+                                      color: theme.colorScheme.onSurface,
+                                    ),
+                                  )
+                                : Image.asset(
                                     'assets/app_icon/singsync.png',
                                     width: centerArtworkSize,
                                     height: centerArtworkSize,
                                     fit: BoxFit.cover,
+                                    gaplessPlayback: true,
                                   ),
-                                );
-                              },
-                            ),
-                          )
-                        : centerIcon != null
-                            ? Container(
-                                width: centerArtworkSize,
-                                height: centerArtworkSize,
-                                color: centerLabelColor,
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  centerIcon,
-                                  size: size * 0.26,
-                                  color: theme.colorScheme.onSurface,
-                                ),
-                              )
-                            : ClipOval(
-                                child: Image.asset(
-                                  'assets/app_icon/singsync.png',
-                                  width: centerArtworkSize,
-                                  height: centerArtworkSize,
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
+                      ),
+                    ),
                   ),
                   Container(
                     width: size * 0.072,

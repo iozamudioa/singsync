@@ -1,19 +1,30 @@
-package net.iozamudioa.lyric_notifier
+package net.iozamudioa.singsync
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.app.SearchManager
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.media.MediaMetadata
+import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 
 class PixelNowPlayingNotificationListener : NotificationListenerService() {
     private var lastEventKey: String? = null
@@ -48,6 +59,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             ?.maxByOrNull { scorePayload(it) }
 
         if (currentPayload != null) {
+            logActiveSessionSnapshot(currentPayload.sourcePackage)
             emitPayloadIfNew(currentPayload)
         }
     }
@@ -66,6 +78,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
         if (!shouldEmitPayload(payload)) {
             return
         }
+        logActiveSessionSnapshot(payload.sourcePackage)
         emitPayloadIfNew(payload)
     }
 
@@ -128,6 +141,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
     ): Boolean {
         val query = searchQuery?.trim().orEmpty()
         val selected = selectedPackage?.trim().orEmpty()
+
         if (selected.isNotEmpty() && query.isNotEmpty()) {
             if (openSelectedAppWithQuery(packageName = selected, query = query)) {
                 return true
@@ -142,8 +156,6 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
 
         val candidates = linkedSetOf<String>()
         sourcePackage?.trim()?.takeIf { it.isNotBlank() }?.let { candidates.add(it) }
-        findBestMediaController(sourcePackage)?.packageName?.let { candidates.add(it) }
-        findBestMediaController(null)?.packageName?.let { candidates.add(it) }
         lastPayload?.get("sourcePackage")?.trim()?.takeIf { it.isNotBlank() }?.let {
             candidates.add(it)
         }
@@ -215,6 +227,295 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             "isPlaying" to isPlaying,
             "sourcePackage" to controller.packageName,
         )
+    }
+
+    private fun getActiveMediaSessionSnapshot(sourcePackage: String?): Map<String, Any?>? {
+        val controller = findBestMediaController(sourcePackage) ?: return null
+        val playbackState = controller.playbackState
+        val metadata = controller.metadata
+        val queue = controller.queue.orEmpty()
+
+        val payload = mutableMapOf<String, Any?>(
+            "sourcePackage" to controller.packageName,
+            "requestedSourcePackage" to sourcePackage,
+            "sessionTag" to controller.tag,
+            "ratingType" to controller.ratingType,
+            "hasSessionActivity" to (controller.sessionActivity != null),
+            "sessionExtras" to bundleToMap(controller.extras),
+            "sessionInfo" to bundleToMap(controller.sessionInfo),
+            "playbackState" to playbackStateToMap(playbackState),
+            "metadata" to metadataToMap(metadata),
+            "queueTitle" to controller.queueTitle?.toString(),
+            "queueSize" to queue.size,
+            "queueSample" to queue.take(12).mapIndexed { index, item ->
+                queueItemToMap(index, item)
+            },
+            "playbackInfo" to playbackInfoToMap(controller.playbackInfo),
+        )
+
+        return payload
+    }
+
+    private fun playbackStateToMap(playbackState: PlaybackState?): Map<String, Any?>? {
+        if (playbackState == null) {
+            return null
+        }
+
+        return mapOf(
+            "stateCode" to playbackState.state,
+            "stateLabel" to playbackStateLabel(playbackState.state),
+            "isActive" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                playbackState.isActive
+            } else {
+                isPlaybackStateActive(playbackState.state)
+            },
+            "positionMs" to playbackState.position,
+            "bufferedPositionMs" to playbackState.bufferedPosition,
+            "playbackSpeed" to playbackState.playbackSpeed,
+            "lastPositionUpdateTimeMs" to playbackState.lastPositionUpdateTime,
+            "activeQueueItemId" to playbackState.activeQueueItemId,
+            "errorMessage" to playbackState.errorMessage?.toString(),
+            "actionsMask" to playbackState.actions,
+            "actions" to decodePlaybackActions(playbackState.actions),
+            "customActions" to playbackState.customActions.orEmpty().map { action ->
+                mapOf(
+                    "id" to action.action,
+                    "name" to action.name?.toString(),
+                    "iconResId" to action.icon,
+                    "extras" to bundleToMap(action.extras),
+                )
+            },
+            "extras" to bundleToMap(playbackState.extras),
+        )
+    }
+
+    private fun metadataToMap(metadata: MediaMetadata?): Map<String, Any?>? {
+        if (metadata == null) {
+            return null
+        }
+
+        val values = mutableMapOf<String, Any?>()
+        val sortedKeys = metadata.keySet().sorted()
+        for (key in sortedKeys) {
+            values[key] = readMetadataValue(metadata, key)
+        }
+
+        val description = metadata.description
+        val descriptionMap = mapOf(
+            "mediaId" to description.mediaId,
+            "title" to description.title?.toString(),
+            "subtitle" to description.subtitle?.toString(),
+            "description" to description.description?.toString(),
+            "iconUri" to description.iconUri?.toString(),
+            "mediaUri" to description.mediaUri?.toString(),
+            "extras" to bundleToMap(description.extras),
+            "iconBitmap" to bitmapToMap(description.iconBitmap),
+        )
+
+        val payload = mutableMapOf<String, Any?>(
+            "size" to metadata.size(),
+            "keys" to sortedKeys,
+            "values" to values,
+            "description" to descriptionMap,
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            payload["bitmapDimensionLimit"] = metadata.bitmapDimensionLimit
+        }
+
+        return payload
+    }
+
+    private fun queueItemToMap(index: Int, item: android.media.session.MediaSession.QueueItem): Map<String, Any?> {
+        val description = item.description
+        return mapOf(
+            "index" to index,
+            "queueId" to item.queueId,
+            "mediaId" to description.mediaId,
+            "title" to description.title?.toString(),
+            "subtitle" to description.subtitle?.toString(),
+            "description" to description.description?.toString(),
+            "iconUri" to description.iconUri?.toString(),
+            "mediaUri" to description.mediaUri?.toString(),
+            "extras" to bundleToMap(description.extras),
+        )
+    }
+
+    private fun playbackInfoToMap(playbackInfo: MediaController.PlaybackInfo?): Map<String, Any?>? {
+        if (playbackInfo == null) {
+            return null
+        }
+
+        return mapOf(
+            "playbackType" to playbackInfo.playbackType,
+            "playbackTypeLabel" to if (playbackInfo.playbackType == MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE) {
+                "remote"
+            } else {
+                "local"
+            },
+            "volumeControl" to playbackInfo.volumeControl,
+            "maxVolume" to playbackInfo.maxVolume,
+            "currentVolume" to playbackInfo.currentVolume,
+            "audioAttributes" to playbackInfo.audioAttributes?.toString(),
+        )
+    }
+
+    private fun readMetadataValue(metadata: MediaMetadata, key: String): Any? {
+        return when {
+            METADATA_LONG_KEYS.contains(key) -> metadata.getLong(key)
+            METADATA_BITMAP_KEYS.contains(key) -> bitmapToMap(metadata.getBitmap(key))
+            METADATA_RATING_KEYS.contains(key) -> ratingToMap(metadata.getRating(key))
+            else -> metadata.getText(key)?.toString()
+                ?: metadata.getString(key)
+        }
+    }
+
+    private fun bitmapToMap(bitmap: Bitmap?): Map<String, Any?>? {
+        if (bitmap == null) {
+            return null
+        }
+
+        return mapOf(
+            "width" to bitmap.width,
+            "height" to bitmap.height,
+            "byteCount" to bitmap.byteCount,
+            "allocationByteCount" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                bitmap.allocationByteCount
+            } else {
+                bitmap.byteCount
+            },
+            "config" to bitmap.config?.name,
+        )
+    }
+
+    private fun ratingToMap(rating: Rating?): Map<String, Any?>? {
+        if (rating == null) {
+            return null
+        }
+
+        return mapOf(
+            "isRated" to rating.isRated,
+            "style" to rating.ratingStyle,
+            "hasHeart" to if (rating.ratingStyle == Rating.RATING_HEART) {
+                rating.hasHeart()
+            } else {
+                null
+            },
+            "isThumbUp" to if (rating.ratingStyle == Rating.RATING_THUMB_UP_DOWN) {
+                rating.isThumbUp()
+            } else {
+                null
+            },
+            "starRating" to if (
+                rating.ratingStyle == Rating.RATING_3_STARS ||
+                rating.ratingStyle == Rating.RATING_4_STARS ||
+                rating.ratingStyle == Rating.RATING_5_STARS
+            ) {
+                rating.starRating
+            } else {
+                null
+            },
+            "percentRating" to if (rating.ratingStyle == Rating.RATING_PERCENTAGE) {
+                rating.percentRating
+            } else {
+                null
+            },
+        )
+    }
+
+    private fun bundleToMap(bundle: Bundle?): Map<String, Any?>? {
+        if (bundle == null) {
+            return null
+        }
+
+        val map = mutableMapOf<String, Any?>()
+        for (key in bundle.keySet()) {
+            map[key] = anyToJsonCompatible(bundle.get(key))
+        }
+        return map
+    }
+
+    private fun anyToJsonCompatible(value: Any?): Any? {
+        return when (value) {
+            null -> null
+            is Bundle -> bundleToMap(value)
+            is CharSequence -> value.toString()
+            is Uri -> value.toString()
+            is Bitmap -> bitmapToMap(value)
+            is Rating -> ratingToMap(value)
+            is Array<*> -> value.map { anyToJsonCompatible(it) }
+            is Iterable<*> -> value.map { anyToJsonCompatible(it) }
+            is Boolean, is Number, is String -> value
+            else -> value.toString()
+        }
+    }
+
+    private fun playbackStateLabel(state: Int): String {
+        return when (state) {
+            PlaybackState.STATE_NONE -> "none"
+            PlaybackState.STATE_STOPPED -> "stopped"
+            PlaybackState.STATE_PAUSED -> "paused"
+            PlaybackState.STATE_PLAYING -> "playing"
+            PlaybackState.STATE_FAST_FORWARDING -> "fast_forwarding"
+            PlaybackState.STATE_REWINDING -> "rewinding"
+            PlaybackState.STATE_BUFFERING -> "buffering"
+            PlaybackState.STATE_ERROR -> "error"
+            PlaybackState.STATE_CONNECTING -> "connecting"
+            PlaybackState.STATE_SKIPPING_TO_PREVIOUS -> "skipping_to_previous"
+            PlaybackState.STATE_SKIPPING_TO_NEXT -> "skipping_to_next"
+            PlaybackState.STATE_SKIPPING_TO_QUEUE_ITEM -> "skipping_to_queue_item"
+            else -> "unknown"
+        }
+    }
+
+    private fun decodePlaybackActions(actions: Long): List<String> {
+        val decoded = mutableListOf<String>()
+        for ((mask, label) in PLAYBACK_ACTION_LABELS) {
+            if ((actions and mask) != 0L) {
+                decoded += label
+            }
+        }
+        return decoded
+    }
+
+    private fun logActiveSessionSnapshot(sourcePackage: String?) {
+        if (!DEBUG_SESSION_SNAPSHOT_LOGS) {
+            return
+        }
+
+        val snapshot = getActiveMediaSessionSnapshot(sourcePackage) ?: return
+        try {
+            val json = JSONObject.wrap(snapshot)?.toString() ?: return
+            logChunkedSnapshotJson(json)
+        } catch (_: Throwable) {
+            Log.i(TAG, "session_snapshot_json_fallback=$snapshot")
+        }
+    }
+
+    private fun logChunkedSnapshotJson(json: String) {
+        val chunkSize = 2800
+        val total = (json.length + chunkSize - 1) / chunkSize
+        val snapshotId = SystemClock.elapsedRealtime()
+
+        Log.i(
+            TAG,
+            "SESSION_SNAPSHOT_JSON_BEGIN id=$snapshotId total=$total length=${json.length}",
+        )
+
+        var index = 0
+        var part = 1
+        while (index < json.length) {
+            val end = (index + chunkSize).coerceAtMost(json.length)
+            val chunk = json.substring(index, end)
+            Log.i(
+                TAG,
+                "SESSION_SNAPSHOT_JSON_PART id=$snapshotId index=$part/$total payload=$chunk",
+            )
+            index = end
+            part += 1
+        }
+
+        Log.i(TAG, "SESSION_SNAPSHOT_JSON_END id=$snapshotId")
     }
 
     private fun launchPackageApp(packageName: String): Boolean {
@@ -328,7 +629,12 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
         return when {
             PIXEL_NOW_PLAYING_PACKAGES.contains(packageName) ->
                 payloadFromPixelNowPlaying(extras, packageName)
-            isActiveMediaPlayerNotification(sbn.notification) -> payloadFromMediaPlayer(extras, packageName)
+            isActiveMediaPlayerNotification(sbn.notification) ->
+                payloadFromMediaPlayer(
+                    notification = sbn.notification,
+                    extras = extras,
+                    packageName = packageName,
+                )
             else -> null
         }
     }
@@ -420,6 +726,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
     }
 
     private fun payloadFromMediaPlayer(
+        notification: Notification,
         extras: Bundle,
         packageName: String,
     ): NowPlayingPayload? {
@@ -469,7 +776,11 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             return null
         }
 
-        val artworkUrl = extractMediaArtworkUrl(packageName, extras)
+        val artworkUrl = extractMediaArtworkUrl(
+            packageName = packageName,
+            notification = notification,
+            extras = extras,
+        )
 
         return NowPlayingPayload(
             title = title,
@@ -480,19 +791,143 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
         )
     }
 
-    private fun extractMediaArtworkUrl(packageName: String, extras: Bundle): String? {
+    private fun extractMediaArtworkUrl(
+        packageName: String,
+        notification: Notification,
+        extras: Bundle,
+    ): String? {
         val controller = findBestMediaController(packageName)
-        val metadata = controller?.metadata ?: return null
+        val metadata = controller?.metadata
+        val seed = buildArtworkSeed(packageName, extras)
 
         val candidates = listOf(
-            metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI),
-            metadata.getString(MediaMetadata.METADATA_KEY_ART_URI),
-            metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI),
+            metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI),
+            metadata?.getString(MediaMetadata.METADATA_KEY_ART_URI),
+            metadata?.getString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI),
         )
 
-        return candidates
-            .mapNotNull { it?.trim() }
-            .firstOrNull { it.startsWith("http://") || it.startsWith("https://") }
+        for (candidate in candidates.mapNotNull { it?.trim() }) {
+            if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+                return candidate
+            }
+
+            persistArtworkFromUri(candidate, seed)?.let { return it }
+        }
+
+        val metadataBitmaps = listOf(
+            metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART),
+            metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART),
+            metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON),
+            metadata?.description?.iconBitmap,
+        )
+
+        for ((index, bitmap) in metadataBitmaps.withIndex()) {
+            if (bitmap != null) {
+                persistArtworkBitmap(bitmap, "$seed|meta|$index")?.let { return it }
+            }
+        }
+
+        val extrasBitmaps = listOf(
+            getBitmapFromExtras(extras, Notification.EXTRA_LARGE_ICON_BIG),
+            getBitmapFromExtras(extras, Notification.EXTRA_LARGE_ICON),
+            getBitmapFromExtras(extras, Notification.EXTRA_PICTURE),
+        )
+
+        for ((index, bitmap) in extrasBitmaps.withIndex()) {
+            if (bitmap != null) {
+                persistArtworkBitmap(bitmap, "$seed|notif|$index")?.let { return it }
+            }
+        }
+
+        return null
+    }
+
+    private fun buildArtworkSeed(packageName: String, extras: Bundle): String {
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
+        val artist = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
+        val album = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim().orEmpty()
+        return "$packageName|$title|$artist|$album"
+    }
+
+    private fun persistArtworkFromUri(rawUri: String, seed: String): String? {
+        return try {
+            val uri = Uri.parse(rawUri)
+            val scheme = uri.scheme?.lowercase().orEmpty()
+
+            if (scheme == "file") {
+                return uri.toString()
+            }
+
+            val stream = contentResolver.openInputStream(uri) ?: return null
+            val bytes = stream.use { it.readBytes() }
+            if (bytes.isEmpty()) {
+                return null
+            }
+
+            val file = buildArtworkCacheFile("$seed|uri|$rawUri")
+            FileOutputStream(file).use { it.write(bytes) }
+            Uri.fromFile(file).toString()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun persistArtworkBitmap(bitmap: Bitmap, seed: String): String? {
+        return try {
+            val file = buildArtworkCacheFile(seed)
+            FileOutputStream(file).use { output ->
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                    return null
+                }
+            }
+            Uri.fromFile(file).toString()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun buildArtworkCacheFile(seed: String): File {
+        val directory = File(cacheDir, "now_playing_artwork")
+        if (!directory.exists()) {
+            directory.mkdirs()
+        }
+        return File(directory, "art_${md5(seed)}.png")
+    }
+
+    private fun md5(input: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        val builder = StringBuilder(digest.size * 2)
+        for (byte in digest) {
+            builder.append(String.format("%02x", byte))
+        }
+        return builder.toString()
+    }
+
+    private fun getBitmapFromExtras(extras: Bundle, key: String): Bitmap? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                extras.getParcelable(key, Bitmap::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                (extras.getParcelable(key) as? Bitmap)
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun drawableToBitmap(drawable: Drawable): Bitmap {
+        if (drawable is BitmapDrawable) {
+            drawable.bitmap?.let { return it }
+        }
+
+        val width = drawable.intrinsicWidth.takeIf { it > 0 } ?: 512
+        val height = drawable.intrinsicHeight.takeIf { it > 0 } ?: 512
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bitmap
     }
 
     private fun isActiveMediaPlayerNotification(notification: Notification): Boolean {
@@ -865,6 +1300,10 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             return activeInstance?.getActiveMediaPlaybackState(sourcePackage)
         }
 
+        fun getActiveSessionSnapshot(sourcePackage: String?): Map<String, Any?>? {
+            return activeInstance?.getActiveMediaSessionSnapshot(sourcePackage)
+        }
+
         fun seekMediaTo(positionMs: Long, sourcePackage: String?): Boolean {
             return activeInstance?.seekActiveMediaPlayer(positionMs, sourcePackage) == true
         }
@@ -885,7 +1324,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
         private const val MEDIA_PLAY_PAUSE = "play_pause"
         private const val MEDIA_NEXT = "next"
         private val IGNORED_PACKAGES = setOf(
-            "net.iozamudioa.lyric_notifier",
+            "net.iozamudioa.singsync",
             "com.android.systemui",
         )
         private val HELPER_TEXT_MARKERS = listOf(
@@ -895,6 +1334,45 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             "está sonando",
             "esta sonando",
             "ahora",
+        )
+        private const val DEBUG_SESSION_SNAPSHOT_LOGS = true
+        private val METADATA_LONG_KEYS = setOf(
+            MediaMetadata.METADATA_KEY_DURATION,
+            MediaMetadata.METADATA_KEY_YEAR,
+            MediaMetadata.METADATA_KEY_TRACK_NUMBER,
+            MediaMetadata.METADATA_KEY_NUM_TRACKS,
+            MediaMetadata.METADATA_KEY_DISC_NUMBER,
+            MediaMetadata.METADATA_KEY_BT_FOLDER_TYPE,
+        )
+        private val METADATA_BITMAP_KEYS = setOf(
+            MediaMetadata.METADATA_KEY_ART,
+            MediaMetadata.METADATA_KEY_ALBUM_ART,
+            MediaMetadata.METADATA_KEY_DISPLAY_ICON,
+        )
+        private val METADATA_RATING_KEYS = setOf(
+            MediaMetadata.METADATA_KEY_RATING,
+            MediaMetadata.METADATA_KEY_USER_RATING,
+        )
+        private val PLAYBACK_ACTION_LABELS = linkedMapOf(
+            PlaybackState.ACTION_STOP to "stop",
+            PlaybackState.ACTION_PAUSE to "pause",
+            PlaybackState.ACTION_PLAY to "play",
+            PlaybackState.ACTION_REWIND to "rewind",
+            PlaybackState.ACTION_SKIP_TO_PREVIOUS to "skip_to_previous",
+            PlaybackState.ACTION_SKIP_TO_NEXT to "skip_to_next",
+            PlaybackState.ACTION_FAST_FORWARD to "fast_forward",
+            PlaybackState.ACTION_SET_RATING to "set_rating",
+            PlaybackState.ACTION_SEEK_TO to "seek_to",
+            PlaybackState.ACTION_PLAY_PAUSE to "play_pause",
+            PlaybackState.ACTION_PLAY_FROM_MEDIA_ID to "play_from_media_id",
+            PlaybackState.ACTION_PLAY_FROM_SEARCH to "play_from_search",
+            PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM to "skip_to_queue_item",
+            PlaybackState.ACTION_PLAY_FROM_URI to "play_from_uri",
+            PlaybackState.ACTION_PREPARE to "prepare",
+            PlaybackState.ACTION_PREPARE_FROM_MEDIA_ID to "prepare_from_media_id",
+            PlaybackState.ACTION_PREPARE_FROM_SEARCH to "prepare_from_search",
+            PlaybackState.ACTION_PREPARE_FROM_URI to "prepare_from_uri",
+            PlaybackState.ACTION_SET_PLAYBACK_SPEED to "set_playback_speed",
         )
         private val ARTIST_WORDS = setOf(
             "el", "la", "los", "las",
