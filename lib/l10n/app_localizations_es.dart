@@ -197,6 +197,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get snapshotGeneratedWithBrand => 'Generado con SingSync';
 
   @override
+  String get snapshotLineSelectionTitle => 'Tu frase para el recuerdo';
+
+  @override
   String get lyricsCopied => 'Letra copiada';
 
   @override

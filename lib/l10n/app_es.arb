@@ -79,6 +79,7 @@
   "snapshotVisibleVerse": "Verso visible",
   "snapshotNoLyrics": "Sin letra disponible",
   "snapshotGeneratedWithBrand": "Generado con SingSync",
+  "snapshotLineSelectionTitle": "Tu frase para el recuerdo",
   "lyricsCopied": "Letra copiada",
   "lyricsAssociated": "Letra asociada a la canción",
   "lyricsNotAssociated": "No se pudo asociar la letra",

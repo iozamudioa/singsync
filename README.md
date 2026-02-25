@@ -36,6 +36,12 @@ Con eso decide qué mostrar y cómo comportarse (porque sí, el contexto importa
 
 ## Funcionalidades principales
 
+### Novedades v1.4.0 (sí, salió)
+
+- **Custom snapshot**: ahora el snapshot no es “lo que tocó”, es lo que realmente querías armar.
+- **Flujo para seleccionar letra y color**: primero eliges líneas, luego color/estilo en preview, porque improvisar en producción ya lo hicimos suficiente.
+- **Extracción de color desde carátula**: la app toma color dominante del artwork para que todo combine sin que tengas que jugar a diseñador a las 2 a.m.
+
 ### Reproducción y letras
 
 - Detección de canción actual por notificaciones/sesión multimedia 🔎.
@@ -158,7 +164,7 @@ Si se filtran, no es “detallito”: rota credenciales y reemplaza keystore. S�
 
 ## Estado actual
 
-- Versión actual: **1.3.1+5**
+- Versión actual: **1.4.0+6**
 - Análisis estático: **sin issues** (`flutter analyze --no-fatal-infos --no-fatal-warnings`)
 
 Milagro temporal, disfrútalo antes de abrir el próximo PR y convocar a los bugs de regreso. 🫡

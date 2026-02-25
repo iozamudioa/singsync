@@ -161,6 +161,7 @@ class SnapshotRenderRequest {
     this.artworkUrl,
     this.selectedColor,
     this.preloadedArtworkImage,
+    this.renderScale = 2.2,
   });
 
   final ThemeData theme;
@@ -175,6 +176,7 @@ class SnapshotRenderRequest {
   final String? artworkUrl;
   final Color? selectedColor;
   final ui.Image? preloadedArtworkImage;
+  final double renderScale;
 }
 
 class SnapshotArtworkTools {
@@ -467,8 +469,8 @@ class SnapshotDialogTools {
             children: [
               Positioned.fill(
                 child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
+                  filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  child: ColoredBox(color: Colors.black.withValues(alpha: 0.34)),
                 ),
               ),
               Center(
@@ -548,44 +550,85 @@ class SnapshotDialogTools {
                               ),
                               const SizedBox(height: 10),
                               Flexible(
-                                child: ListView.separated(
-                                  controller: listScrollController,
-                                  itemCount: lines.length,
-                                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                                  itemBuilder: (context, index) {
-                                    final isSelected = selectedIndexes.contains(index);
-                                    return InkWell(
-                                      key: lineKeys[index],
-                                      borderRadius: BorderRadius.circular(12),
-                                      onTap: () {
-                                        modalSetState(() {
-                                          if (isSelected) {
-                                            selectedIndexes.remove(index);
-                                          } else {
-                                            selectedIndexes.add(index);
-                                          }
-                                        });
-                                      },
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                        decoration: BoxDecoration(
+                                child: Stack(
+                                  children: [
+                                    ListView.separated(
+                                      controller: listScrollController,
+                                      itemCount: lines.length,
+                                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                                      itemBuilder: (context, index) {
+                                        final isSelected = selectedIndexes.contains(index);
+                                        return InkWell(
+                                          key: lineKeys[index],
                                           borderRadius: BorderRadius.circular(12),
-                                          color: isSelected
-                                              ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.60)
-                                              : theme.colorScheme.surface.withValues(alpha: 0.20),
-                                        ),
-                                        child: Text(
-                                          lines[index],
-                                          textAlign: TextAlign.center,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodyLarge?.copyWith(
-                                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+                                          onTap: () {
+                                            unawaited(HapticFeedback.selectionClick());
+                                            modalSetState(() {
+                                              if (isSelected) {
+                                                selectedIndexes.remove(index);
+                                              } else {
+                                                selectedIndexes.add(index);
+                                              }
+                                            });
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(12),
+                                              color: isSelected
+                                                  ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.60)
+                                                  : theme.colorScheme.surface.withValues(alpha: 0.20),
+                                            ),
+                                            child: Text(
+                                              lines[index],
+                                              textAlign: TextAlign.center,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.bodyLarge?.copyWith(
+                                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    IgnorePointer(
+                                      child: Align(
+                                        alignment: Alignment.topCenter,
+                                        child: Container(
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: [
+                                                theme.colorScheme.surface.withValues(alpha: 0.62),
+                                                theme.colorScheme.surface.withValues(alpha: 0.00),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    );
-                                  },
+                                    ),
+                                    IgnorePointer(
+                                      child: Align(
+                                        alignment: Alignment.bottomCenter,
+                                        child: Container(
+                                          height: 24,
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: [
+                                                theme.colorScheme.surface.withValues(alpha: 0.00),
+                                                theme.colorScheme.surface.withValues(alpha: 0.62),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -636,320 +679,27 @@ class SnapshotDialogTools {
     required String darkThemeLabel,
     Future<bool> Function(SnapshotDialogResult currentState)? onShareInPlace,
   }) async {
-    var previewBytes = initialBytes;
-    var selectedColor = initialColor;
-    var useArtworkBackground = initialUseArtworkBackground;
-    var generatedBrightness = initialGeneratedBrightness;
-    var renderRequestId = 0;
-
     return showDialog<SnapshotDialogResult>(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: false,
       barrierColor: Colors.transparent,
-      builder: (dialogContext) {
-        final theme = Theme.of(dialogContext);
-        final size = MediaQuery.of(dialogContext).size;
-
-        Future<void> rerenderPreview(StateSetter modalSetState, {
-          Color? color,
-          bool? artworkBackground,
-          Brightness? brightness,
-        }) async {
-          final nextColor = color ?? selectedColor;
-          final nextUseArtworkBackground = artworkBackground ?? useArtworkBackground;
-          final nextBrightness = brightness ?? generatedBrightness;
-          final hasColorChange = selectedColor.toARGB32() != nextColor.toARGB32();
-          final hasBackgroundChange = useArtworkBackground != nextUseArtworkBackground;
-          final hasBrightnessChange = generatedBrightness != nextBrightness;
-          if (!hasColorChange && !hasBackgroundChange && !hasBrightnessChange) {
-            return;
-          }
-
-          renderRequestId += 1;
-          final currentRequestId = renderRequestId;
-          modalSetState(() {
-            selectedColor = nextColor;
-            useArtworkBackground = nextUseArtworkBackground;
-            generatedBrightness = nextBrightness;
-          });
-          final rerendered = await rerender(
-            nextColor,
-            nextUseArtworkBackground,
-            nextBrightness,
-          );
-          if (!dialogContext.mounted ||
-              currentRequestId != renderRequestId ||
-              rerendered == null ||
-              rerendered.isEmpty) {
-            return;
-          }
-          modalSetState(() {
-            previewBytes = rerendered;
-          });
-        }
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => Navigator.of(dialogContext).pop(),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
-                ),
-              ),
-              Center(
-                child: GestureDetector(
-                  onTap: () {},
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: math.min(540.0, size.width * 0.92),
-                      maxHeight: size.height * 0.86,
-                    ),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surface.withValues(alpha: 0.68),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
-                        ),
-                      ),
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-                      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                      child: StatefulBuilder(
-                        builder: (context, modalSetState) {
-                          return Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                children: [
-                                  IconButton(
-                                    style: _actionButtonStyle(theme),
-                                    onPressed: () => Navigator.of(dialogContext).pop(
-                                      SnapshotDialogResult(
-                                        pngBytes: previewBytes,
-                                        selectedColor: selectedColor,
-                                        useArtworkBackground: useArtworkBackground,
-                                        generatedBrightness: generatedBrightness,
-                                        action: SnapshotDialogAction.back,
-                                      ),
-                                    ),
-                                    tooltip: backTooltip,
-                                    icon: const Icon(Icons.arrow_back_rounded),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      useArtworkBackgroundLabel,
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                  Switch.adaptive(
-                                    value: useArtworkBackground,
-                                    onChanged: canUseArtworkBackground
-                                        ? (value) {
-                                            unawaited(
-                                              rerenderPreview(
-                                                modalSetState,
-                                                artworkBackground: value,
-                                              ),
-                                            );
-                                          }
-                                        : null,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Flexible(
-                                child: Stack(
-                                  children: [
-                                    AnimatedSwitcher(
-                                      duration: const Duration(milliseconds: 220),
-                                      switchInCurve: Curves.easeInOut,
-                                      switchOutCurve: Curves.easeInOut,
-                                      transitionBuilder: (child, animation) =>
-                                          FadeTransition(opacity: animation, child: child),
-                                      child: ClipRRect(
-                                        key: ValueKey<int>(previewBytes.hashCode),
-                                        borderRadius: BorderRadius.circular(14),
-                                        child: InteractiveViewer(
-                                          minScale: 1,
-                                          maxScale: 3.2,
-                                          child: Image.memory(previewBytes, fit: BoxFit.contain),
-                                        ),
-                                      ),
-                                    ),
-                                    Positioned(
-                                      top: 10,
-                                      right: 10,
-                                      child: IconButton(
-                                        style: _actionButtonStyle(theme),
-                                        onPressed: () {
-                                          final nextBrightness =
-                                              generatedBrightness == Brightness.dark
-                                                  ? Brightness.light
-                                                  : Brightness.dark;
-                                          unawaited(
-                                            rerenderPreview(
-                                              modalSetState,
-                                              brightness: nextBrightness,
-                                            ),
-                                          );
-                                        },
-                                        tooltip: generatedBrightness == Brightness.dark
-                                            ? lightThemeLabel
-                                            : darkThemeLabel,
-                                        icon: Icon(
-                                          generatedBrightness == Brightness.dark
-                                              ? Icons.nightlight_round
-                                              : Icons.wb_sunny_rounded,
-                                        ),
-                                      ),
-                                    ),
-                                    Positioned(
-                                      right: 10,
-                                      bottom: 10,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          IconButton(
-                                            style: _actionButtonStyle(theme),
-                                            onPressed: () => Navigator.of(dialogContext).pop(
-                                              SnapshotDialogResult(
-                                                pngBytes: previewBytes,
-                                                selectedColor: selectedColor,
-                                                useArtworkBackground: useArtworkBackground,
-                                                generatedBrightness: generatedBrightness,
-                                                action: SnapshotDialogAction.save,
-                                              ),
-                                            ),
-                                            icon: const Icon(Icons.save_alt_rounded),
-                                            tooltip: saveTooltip,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          IconButton(
-                                            style: _actionButtonStyle(theme),
-                                            onPressed: () async {
-                                              final current = SnapshotDialogResult(
-                                                pngBytes: previewBytes,
-                                                selectedColor: selectedColor,
-                                                useArtworkBackground: useArtworkBackground,
-                                                generatedBrightness: generatedBrightness,
-                                                action: SnapshotDialogAction.share,
-                                              );
-                                              if (onShareInPlace != null) {
-                                                final didShare = await onShareInPlace(current);
-                                                if (didShare && dialogContext.mounted) {
-                                                  Navigator.of(dialogContext).pop(current);
-                                                }
-                                                return;
-                                              }
-                                              if (!dialogContext.mounted) {
-                                                return;
-                                              }
-                                              Navigator.of(dialogContext).pop(current);
-                                            },
-                                            icon: const Icon(Icons.share_rounded),
-                                            tooltip: shareTooltip,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                height: 52,
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    return SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      child: ConstrainedBox(
-                                        constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            for (var index = 0; index < palette.length; index++) ...[
-                                              if (index > 0) const SizedBox(width: 10),
-                                              Builder(
-                                                builder: (context) {
-                                                  final color = palette[index];
-                                                  final selected =
-                                                      selectedColor.toARGB32() == color.toARGB32();
-                                                  final glowColor = theme.colorScheme.primary;
-                                                  return InkWell(
-                                                    borderRadius: BorderRadius.circular(999),
-                                                    onTap: () {
-                                                      unawaited(
-                                                        rerenderPreview(
-                                                          modalSetState,
-                                                          color: color,
-                                                        ),
-                                                      );
-                                                    },
-                                                    child: Container(
-                                                      width: 40,
-                                                      height: 40,
-                                                      decoration: BoxDecoration(
-                                                        shape: BoxShape.circle,
-                                                        color: color,
-                                                        border: Border.all(
-                                                          color: selected
-                                                              ? glowColor
-                                                              : theme.colorScheme.onSurface.withValues(alpha: 0.24),
-                                                          width: selected ? 3 : 1,
-                                                        ),
-                                                        boxShadow: selected
-                                                            ? [
-                                                                BoxShadow(
-                                                                  color: glowColor.withValues(alpha: 0.55),
-                                                                  blurRadius: 14,
-                                                                  spreadRadius: 2,
-                                                                ),
-                                                              ]
-                                                            : null,
-                                                      ),
-                                                    ),
-                                                  );
-                                                },
-                                              ),
-                                            ],
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  static ButtonStyle _actionButtonStyle(ThemeData theme) {
-    return IconButton.styleFrom(
-      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.32),
-      foregroundColor: theme.colorScheme.onSurface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      builder: (_) => _SnapshotPreviewDialog(
+        key: const ValueKey<String>('snapshot_preview_dialog'),
+        initialBytes: initialBytes,
+        initialColor: initialColor,
+        initialUseArtworkBackground: initialUseArtworkBackground,
+        initialGeneratedBrightness: initialGeneratedBrightness,
+        canUseArtworkBackground: canUseArtworkBackground,
+        palette: palette,
+        rerender: rerender,
+        backTooltip: backTooltip,
+        saveTooltip: saveTooltip,
+        shareTooltip: shareTooltip,
+        useArtworkBackgroundLabel: useArtworkBackgroundLabel,
+        lightThemeLabel: lightThemeLabel,
+        darkThemeLabel: darkThemeLabel,
+        onShareInPlace: onShareInPlace,
+      ),
     );
   }
 }
@@ -959,7 +709,7 @@ class SnapshotRenderer {
     final theme = request.theme;
     const baseWidth = 1080.0;
     const baseHeight = 1350.0;
-    const exportScale = 2.2;
+    final exportScale = request.renderScale.clamp(0.8, 3.0);
     final exportWidth = (baseWidth * exportScale).round();
     final exportHeight = (baseHeight * exportScale).round();
 
@@ -1017,7 +767,7 @@ class SnapshotRenderer {
     );
     canvas.drawRRect(
       cardRect,
-      Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.92),
+      Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.80),
     );
 
     const centerX = baseWidth / 2;
@@ -1270,6 +1020,485 @@ class _ColorBucket {
       (_sumR / weight).round().clamp(0, 255),
       (_sumG / weight).round().clamp(0, 255),
       (_sumB / weight).round().clamp(0, 255),
+    );
+  }
+}
+
+class _SnapshotPreviewDialog extends StatefulWidget {
+  const _SnapshotPreviewDialog({
+    super.key,
+    required this.initialBytes,
+    required this.initialColor,
+    required this.initialUseArtworkBackground,
+    required this.initialGeneratedBrightness,
+    required this.canUseArtworkBackground,
+    required this.palette,
+    required this.rerender,
+    required this.backTooltip,
+    required this.saveTooltip,
+    required this.shareTooltip,
+    required this.useArtworkBackgroundLabel,
+    required this.lightThemeLabel,
+    required this.darkThemeLabel,
+    this.onShareInPlace,
+  });
+
+  final Uint8List initialBytes;
+  final Color initialColor;
+  final bool initialUseArtworkBackground;
+  final Brightness initialGeneratedBrightness;
+  final bool canUseArtworkBackground;
+  final List<Color> palette;
+  final Future<Uint8List?> Function(
+    Color color,
+    bool useArtworkBackground,
+    Brightness generatedBrightness,
+  ) rerender;
+  final String backTooltip;
+  final String saveTooltip;
+  final String shareTooltip;
+  final String useArtworkBackgroundLabel;
+  final String lightThemeLabel;
+  final String darkThemeLabel;
+  final Future<bool> Function(SnapshotDialogResult currentState)? onShareInPlace;
+
+  @override
+  State<_SnapshotPreviewDialog> createState() => _SnapshotPreviewDialogState();
+}
+
+class _SnapshotPreviewDialogState extends State<_SnapshotPreviewDialog> {
+  late Uint8List _previewBytes;
+  late Color _selectedColor;
+  late bool _useArtworkBackground;
+  late Brightness _generatedBrightness;
+  int _renderRequestId = 0;
+
+  void _closeDialog([SnapshotDialogResult? result]) {
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _previewBytes = widget.initialBytes;
+    _selectedColor = widget.initialColor;
+    _useArtworkBackground = widget.initialUseArtworkBackground;
+    _generatedBrightness = widget.initialGeneratedBrightness;
+  }
+
+  ButtonStyle _actionButtonStyle(ThemeData theme) {
+    return IconButton.styleFrom(
+      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.32),
+      foregroundColor: theme.colorScheme.onSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  Future<void> _rerenderPreview({
+    Color? color,
+    bool? artworkBackground,
+    Brightness? brightness,
+  }) async {
+    final nextColor = color ?? _selectedColor;
+    final nextUseArtworkBackground = artworkBackground ?? _useArtworkBackground;
+    final nextBrightness = brightness ?? _generatedBrightness;
+    final hasColorChange = _selectedColor.toARGB32() != nextColor.toARGB32();
+    final hasBackgroundChange = _useArtworkBackground != nextUseArtworkBackground;
+    final hasBrightnessChange = _generatedBrightness != nextBrightness;
+    if (!hasColorChange && !hasBackgroundChange && !hasBrightnessChange) {
+      return;
+    }
+
+    _renderRequestId += 1;
+    final currentRequestId = _renderRequestId;
+    setState(() {
+      _selectedColor = nextColor;
+      _useArtworkBackground = nextUseArtworkBackground;
+      _generatedBrightness = nextBrightness;
+    });
+
+    Uint8List? rerendered;
+    try {
+      rerendered = await widget.rerender(
+        nextColor,
+        nextUseArtworkBackground,
+        nextBrightness,
+      );
+    } catch (_) {
+      return;
+    }
+
+    if (!mounted ||
+        currentRequestId != _renderRequestId ||
+        rerendered == null ||
+        rerendered.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _previewBytes = rerendered!;
+    });
+  }
+
+  SnapshotDialogResult _currentResult(SnapshotDialogAction action) {
+    return SnapshotDialogResult(
+      pngBytes: _previewBytes,
+      selectedColor: _selectedColor,
+      useArtworkBackground: _useArtworkBackground,
+      generatedBrightness: _generatedBrightness,
+      action: action,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final size = MediaQuery.of(context).size;
+    final isLandscapeDialog = size.width > size.height;
+    final isLandscapePreview = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    Widget buildPaletteDot(Color color) {
+      final selected = _selectedColor.toARGB32() == color.toARGB32();
+      final glowColor = theme.colorScheme.primary;
+      return InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () {
+          unawaited(
+            _rerenderPreview(
+              color: color,
+            ),
+          );
+        },
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
+            border: Border.all(
+              color: selected
+                  ? glowColor
+                  : theme.colorScheme.onSurface.withValues(alpha: 0.24),
+              width: selected ? 3 : 1,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: glowColor.withValues(alpha: 0.55),
+                      blurRadius: 14,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+      );
+    }
+
+    Widget buildThemeToggleButton() {
+      return IconButton(
+        style: _actionButtonStyle(theme),
+        onPressed: () {
+          final nextBrightness =
+              _generatedBrightness == Brightness.dark ? Brightness.light : Brightness.dark;
+          unawaited(
+            _rerenderPreview(
+              brightness: nextBrightness,
+            ),
+          );
+        },
+        tooltip: _generatedBrightness == Brightness.dark
+            ? widget.lightThemeLabel
+            : widget.darkThemeLabel,
+        icon: Icon(
+          _generatedBrightness == Brightness.dark
+              ? Icons.nightlight_round
+              : Icons.wb_sunny_rounded,
+        ),
+      );
+    }
+
+    Widget buildSaveAndShareButtons() {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            style: _actionButtonStyle(theme),
+            onPressed: () => _closeDialog(_currentResult(SnapshotDialogAction.save)),
+            icon: const Icon(Icons.save_alt_rounded),
+            tooltip: widget.saveTooltip,
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            style: _actionButtonStyle(theme),
+            onPressed: () async {
+              final current = _currentResult(SnapshotDialogAction.share);
+              if (widget.onShareInPlace != null) {
+                final didShare = await widget.onShareInPlace!(current);
+                if (didShare && context.mounted) {
+                  _closeDialog(current);
+                }
+                return;
+              }
+              if (!context.mounted) {
+                return;
+              }
+              _closeDialog(current);
+            },
+            icon: const Icon(Icons.share_rounded),
+            tooltip: widget.shareTooltip,
+          ),
+        ],
+      );
+    }
+
+    final previewStack = Stack(
+      fit: StackFit.expand,
+      children: [
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeInOut,
+          switchOutCurve: Curves.easeInOut,
+          transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+          child: ClipRRect(
+            key: ValueKey<int>(_previewBytes.hashCode),
+            borderRadius: BorderRadius.circular(14),
+            child: InteractiveViewer(
+              minScale: 1,
+              maxScale: 3.2,
+              child: SizedBox.expand(
+                child: Image.memory(_previewBytes, fit: BoxFit.contain),
+              ),
+            ),
+          ),
+        ),
+        if (!isLandscapePreview)
+          Positioned(top: 10, right: 10, child: buildThemeToggleButton()),
+        if (!isLandscapePreview)
+          Positioned(
+            right: 10,
+            bottom: 10,
+            child: buildSaveAndShareButtons(),
+          ),
+      ],
+    );
+
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) {
+          _closeDialog(_currentResult(SnapshotDialogAction.back));
+        }
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _closeDialog(),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                child: ColoredBox(color: Colors.black.withValues(alpha: 0.28)),
+              ),
+            ),
+            Center(
+              child: GestureDetector(
+                onTap: () {},
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: math.min(
+                      isLandscapeDialog ? 740.0 : 540.0,
+                      size.width * 0.94,
+                    ),
+                    maxHeight: size.height * 0.82,
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface.withValues(alpha: 0.68),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.10),
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    child: Stack(
+                      children: [
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (isLandscapePreview)
+                              Expanded(
+                                child: Stack(
+                                  children: [
+                                    LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        const imageAspectRatio = 1080 / 1350;
+                                        const controlsWidth = 220.0;
+                                        const gap = 10.0;
+
+                                        return Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Expanded(
+                                              child: SizedBox(
+                                                height: constraints.maxHeight,
+                                                child: Align(
+                                                  alignment: Alignment.topCenter,
+                                                  child: AspectRatio(
+                                                    aspectRatio: imageAspectRatio,
+                                                    child: previewStack,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: gap),
+                                            SizedBox(
+                                              width: controlsWidth,
+                                              child: SingleChildScrollView(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Expanded(
+                                                          child: Text(
+                                                            widget.useArtworkBackgroundLabel,
+                                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                                              fontWeight: FontWeight.w600,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        Switch.adaptive(
+                                                          value: _useArtworkBackground,
+                                                          onChanged: widget.canUseArtworkBackground
+                                                              ? (value) {
+                                                                  unawaited(
+                                                                    _rerenderPreview(
+                                                                      artworkBackground: value,
+                                                                    ),
+                                                                  );
+                                                                }
+                                                              : null,
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 10),
+                                                    Wrap(
+                                                      spacing: 10,
+                                                      runSpacing: 10,
+                                                      children: [
+                                                        for (final color in widget.palette) buildPaletteDot(color),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+                                    Positioned(
+                                      right: 0,
+                                      bottom: 0,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          buildThemeToggleButton(),
+                                          const SizedBox(width: 8),
+                                          buildSaveAndShareButtons(),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AspectRatio(
+                                    aspectRatio: 1080 / 1350,
+                                    child: previewStack,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          widget.useArtworkBackgroundLabel,
+                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                      Switch.adaptive(
+                                        value: _useArtworkBackground,
+                                        onChanged: widget.canUseArtworkBackground
+                                            ? (value) {
+                                                unawaited(
+                                                  _rerenderPreview(
+                                                    artworkBackground: value,
+                                                  ),
+                                                );
+                                              }
+                                            : null,
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  SizedBox(
+                                    height: 52,
+                                    child: LayoutBuilder(
+                                      builder: (context, constraints) {
+                                        return SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          child: ConstrainedBox(
+                                            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                for (var index = 0; index < widget.palette.length; index++) ...[
+                                                  if (index > 0) const SizedBox(width: 10),
+                                                  buildPaletteDot(widget.palette[index]),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          child: IconButton(
+                            style: _actionButtonStyle(theme),
+                            onPressed: () => _closeDialog(
+                              _currentResult(SnapshotDialogAction.back),
+                            ),
+                            tooltip: widget.backTooltip,
+                            icon: const Icon(Icons.arrow_back_rounded),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

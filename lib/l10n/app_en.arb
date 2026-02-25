@@ -79,6 +79,7 @@
   "snapshotVisibleVerse": "Visible verse",
   "snapshotNoLyrics": "No lyrics available",
   "snapshotGeneratedWithBrand": "Generated with SingSync",
+  "snapshotLineSelectionTitle": "Your lyric for the memory",
   "lyricsCopied": "Lyrics copied",
   "lyricsAssociated": "Lyrics associated to song",
   "lyricsNotAssociated": "Could not associate lyrics",

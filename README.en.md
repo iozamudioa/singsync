@@ -36,6 +36,12 @@ Then it decides what lyrics mode and controls should be active, because context 
 
 ## Core features
 
+### New in v1.4.0 (yes, we shipped it)
+
+- **Custom snapshot**: snapshots are now actually customizable, instead of “well… this is what we got.”
+- **Lyric + color selection flow**: pick lyric lines first, then tune color/style in preview, like organized adults pretending this was always the plan.
+- **Artwork color extraction**: dominant color is pulled from album art so the result looks intentional and not like a random palette generator had a breakdown.
+
 ### Playback and lyrics
 
 - Detects currently playing tracks from notifications/media sessions 🔎.
@@ -157,7 +163,7 @@ No, this is not optional if you enjoy sleeping peacefully.
 
 ## Current status
 
-- Version: **1.3.1+5**
+- Version: **1.4.0+6**
 - Static analysis: **clean** (`flutter analyze --no-fatal-infos --no-fatal-warnings`)
 
 Enjoy it while it lasts before the next PR reintroduces character development. 🫡

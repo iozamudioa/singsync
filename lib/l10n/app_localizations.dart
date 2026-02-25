@@ -446,6 +446,12 @@ abstract class AppLocalizations {
   /// **'Generado con SingSync'**
   String get snapshotGeneratedWithBrand;
 
+  /// No description provided for @snapshotLineSelectionTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Tu frase para el recuerdo'**
+  String get snapshotLineSelectionTitle;
+
   /// No description provided for @lyricsCopied.
   ///
   /// In es, this message translates to:

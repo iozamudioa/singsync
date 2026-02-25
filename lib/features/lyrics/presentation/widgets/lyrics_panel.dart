@@ -200,34 +200,37 @@ class _LyricsPanelState extends State<LyricsPanel>
       final selectableLines = _buildSelectableSnapshotLines(l10n: l10n);
       final artworkImage = await SnapshotArtworkTools.loadArtworkImage(widget.artworkUrl);
       final extractedPalette = await SnapshotArtworkTools.extractPalette(artworkImage);
-      var selectedLineIndices = <int>{
+      var persistedSelectedLineIndices = <int>{
         _defaultSnapshotActiveLineIndex(selectableLines.length),
       }..removeWhere((index) => index < 0 || index >= selectableLines.length);
-      if (selectedLineIndices.isEmpty && selectableLines.isNotEmpty) {
-        selectedLineIndices = <int>{0};
+      if (persistedSelectedLineIndices.isEmpty && selectableLines.isNotEmpty) {
+        persistedSelectedLineIndices = <int>{0};
       }
       SnapshotDialogResult? dialogResult;
 
       while (mounted) {
         final lineSelection = await _showLineSelectionDialog(
           lines: selectableLines,
-          initialIndexes: selectedLineIndices,
+          initialIndexes: persistedSelectedLineIndices,
         );
         if (!mounted || lineSelection == null) {
           _isSnapshotFlowBusy = false;
           return;
         }
-        selectedLineIndices = lineSelection;
+        persistedSelectedLineIndices = lineSelection;
 
         final previewResult = await _showSnapshotPreviewDialog(
           artworkImage: artworkImage,
           extractedPalette: extractedPalette,
           sourceLines: selectableLines,
-          selectedLineIndices: selectedLineIndices,
+          selectedLineIndices: persistedSelectedLineIndices,
         );
-        if (!mounted || previewResult == null) {
+        if (!mounted) {
           _isSnapshotFlowBusy = false;
           return;
+        }
+        if (previewResult == null) {
+          continue;
         }
         if (previewResult.action == SnapshotDialogAction.back) {
           continue;
@@ -242,8 +245,7 @@ class _LyricsPanelState extends State<LyricsPanel>
         return;
       }
 
-      final shouldAnimateCapture =
-          MediaQuery.of(context).orientation == Orientation.landscape;
+      final shouldAnimateCapture = dialogResult.action == SnapshotDialogAction.save;
       if (shouldAnimateCapture) {
         final previewCompleter = Completer<Uint8List?>();
         final animationFuture = _playSnapshotCaptureAnimation(
@@ -282,16 +284,20 @@ class _LyricsPanelState extends State<LyricsPanel>
             generatedThemeBrightness:
                 dialogResult.generatedBrightness == Brightness.dark ? 'dark' : 'light',
             lyricsLines: selectableLines,
-            activeLineIndex: selectedLineIndices.isEmpty
+            activeLineIndex: persistedSelectedLineIndices.isEmpty
                 ? -1
-                : selectedLineIndices.reduce(math.min),
-            activeLineIndexes: selectedLineIndices.toList()..sort(),
+              : persistedSelectedLineIndices.reduce(math.min),
+            activeLineIndexes: persistedSelectedLineIndices.toList()..sort(),
             selectedColorValue: dialogResult.selectedColor?.toARGB32(),
           );
           await SnapshotEditorStore.saveMetadataForDisplayName(
             displayName: snapshotFileName,
             metadata: metadata,
           );
+          if (!mounted) {
+            _isSnapshotFlowBusy = false;
+            return;
+          }
           _showFeedback(context, l10n.snapshotSaved);
           await widget.onSnapshotSavedToGallery?.call();
         }
@@ -334,12 +340,13 @@ class _LyricsPanelState extends State<LyricsPanel>
     required List<String> lines,
     required Set<int> initialIndexes,
   }) async {
+    final l10n = AppLocalizations.of(context);
     return SnapshotDialogTools.showLineSelectionDialog(
       context: context,
       lines: lines,
       initialIndexes: initialIndexes,
-      title: 'Selecciona la letra',
-      nextLabel: 'Siguiente',
+      title: l10n.snapshotLineSelectionTitle,
+      nextLabel: l10n.next,
     );
   }
 
@@ -371,13 +378,45 @@ class _LyricsPanelState extends State<LyricsPanel>
     var selectedColor = palette.first;
     var useArtworkBackground = widget.useArtworkBackground;
     var generatedBrightness = widget.theme.brightness;
-    final previewResult = await _buildSnapshotPng(
-      preloadedArtworkImage: artworkImage,
-      selectedColor: selectedColor,
-      useArtworkBackground: useArtworkBackground,
-      generatedBrightness: generatedBrightness,
-      lines: window.lines,
-      activeLineIndices: window.activeLineIndices,
+    final resolvedSongTitle =
+        widget.songTitle.trim().isEmpty ? l10n.nowPlayingDefaultTitle : widget.songTitle;
+    final resolvedArtistName =
+        widget.artistName.trim().isEmpty ? l10n.unknownArtist : widget.artistName;
+
+    Future<Uint8List?> buildPreviewPng({
+      required Color? color,
+      required bool artworkBackground,
+      required Brightness brightness,
+      required double renderScale,
+    }) {
+      final generationTheme = SnapshotFlowTools.buildGenerationTheme(
+        baseTheme: widget.theme,
+        brightness: brightness,
+      );
+      return SnapshotRenderer.buildPng(
+        SnapshotRenderRequest(
+          theme: generationTheme,
+          songTitle: resolvedSongTitle,
+          artistName: resolvedArtistName,
+          useArtworkBackground: artworkBackground,
+          lyricsLines: window.lines,
+          activeLineIndex: window.activeLineIndices.isEmpty ? -1 : window.activeLineIndices.first,
+          activeLineIndices: window.activeLineIndices,
+          noLyricsFallback: l10n.snapshotNoLyrics,
+          generatedWithBrand: l10n.snapshotGeneratedWithBrand,
+          artworkUrl: widget.artworkUrl,
+          selectedColor: color,
+          preloadedArtworkImage: artworkImage,
+          renderScale: renderScale,
+        ),
+      );
+    }
+
+    final previewResult = await buildPreviewPng(
+      color: selectedColor,
+      artworkBackground: useArtworkBackground,
+      brightness: generatedBrightness,
+      renderScale: 0.95,
     );
     if (previewResult == null || previewResult.isEmpty || !mounted) {
       return null;
@@ -420,17 +459,35 @@ class _LyricsPanelState extends State<LyricsPanel>
       rerender: (color, shouldUseArtworkBackground, brightness) {
         useArtworkBackground = shouldUseArtworkBackground;
         generatedBrightness = brightness;
-        return _buildSnapshotPng(
-          preloadedArtworkImage: artworkImage,
-          selectedColor: color,
-          useArtworkBackground: shouldUseArtworkBackground,
-          generatedBrightness: brightness,
-          lines: window.lines,
-          activeLineIndices: window.activeLineIndices,
+        return buildPreviewPng(
+          color: color,
+          artworkBackground: shouldUseArtworkBackground,
+          brightness: brightness,
+          renderScale: 0.95,
         );
       },
     );
-    return result;
+    if (result == null || result.action != SnapshotDialogAction.save) {
+      return result;
+    }
+
+    final fullBytes = await buildPreviewPng(
+      color: result.selectedColor ?? selectedColor,
+      artworkBackground: result.useArtworkBackground,
+      brightness: result.generatedBrightness,
+      renderScale: 2.2,
+    );
+    if (!mounted || fullBytes == null || fullBytes.isEmpty) {
+      return result;
+    }
+
+    return SnapshotDialogResult(
+      pngBytes: fullBytes,
+      selectedColor: result.selectedColor,
+      useArtworkBackground: result.useArtworkBackground,
+      generatedBrightness: result.generatedBrightness,
+      action: result.action,
+    );
   }
 
   List<String> _buildSelectableSnapshotLines({required AppLocalizations l10n}) {
@@ -664,37 +721,6 @@ class _LyricsPanelState extends State<LyricsPanel>
 
   String _snapshotSavedMessage() {
     return AppLocalizations.of(context).snapshotSaved;
-  }
-
-  Future<Uint8List?> _buildSnapshotPng({
-    required List<String> lines,
-    List<int> activeLineIndices = const <int>[],
-    required Color? selectedColor,
-    required bool useArtworkBackground,
-    required Brightness generatedBrightness,
-    ui.Image? preloadedArtworkImage,
-  }) async {
-    final l10n = AppLocalizations.of(context);
-    final generationTheme = SnapshotFlowTools.buildGenerationTheme(
-      baseTheme: widget.theme,
-      brightness: generatedBrightness,
-    );
-    return SnapshotRenderer.buildPng(
-      SnapshotRenderRequest(
-        theme: generationTheme,
-        songTitle: widget.songTitle.trim().isEmpty ? l10n.nowPlayingDefaultTitle : widget.songTitle,
-        artistName: widget.artistName.trim().isEmpty ? l10n.unknownArtist : widget.artistName,
-        useArtworkBackground: useArtworkBackground,
-        lyricsLines: lines,
-        activeLineIndex: activeLineIndices.isEmpty ? -1 : activeLineIndices.first,
-        activeLineIndices: activeLineIndices,
-        noLyricsFallback: l10n.snapshotNoLyrics,
-        generatedWithBrand: l10n.snapshotGeneratedWithBrand,
-        artworkUrl: widget.artworkUrl,
-        selectedColor: selectedColor,
-        preloadedArtworkImage: preloadedArtworkImage,
-      ),
-    );
   }
 
   Future<void> _associateLyrics(BuildContext context) async {

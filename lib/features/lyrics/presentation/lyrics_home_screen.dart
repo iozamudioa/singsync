@@ -1370,37 +1370,40 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       return;
     }
 
-    var selectedLineIndices = metadata.activeLineIndexes
+    var persistedSelectedLineIndices = metadata.activeLineIndexes
         .where((index) => index >= 0 && index < metadata.lyricsLines.length)
         .toSet();
-    if (selectedLineIndices.isEmpty &&
+    if (persistedSelectedLineIndices.isEmpty &&
         metadata.activeLineIndex >= 0 &&
         metadata.activeLineIndex < metadata.lyricsLines.length) {
-      selectedLineIndices = <int>{metadata.activeLineIndex};
+      persistedSelectedLineIndices = <int>{metadata.activeLineIndex};
     }
-    if (selectedLineIndices.isEmpty && metadata.lyricsLines.isNotEmpty) {
-      selectedLineIndices = <int>{0};
+    if (persistedSelectedLineIndices.isEmpty && metadata.lyricsLines.isNotEmpty) {
+      persistedSelectedLineIndices = <int>{0};
     }
 
     SnapshotDialogResult? preview;
     while (mounted) {
       final lineSelection = await _showSnapshotLineSelectionDialog(
         lines: metadata.lyricsLines,
-        initialIndexes: selectedLineIndices,
+        initialIndexes: persistedSelectedLineIndices,
       );
       if (!mounted || lineSelection == null) {
         return;
       }
-      selectedLineIndices = lineSelection;
+      persistedSelectedLineIndices = lineSelection;
 
       final stepPreview = await _showSnapshotEditPreviewDialog(
         metadata: metadata,
-        selectedLineIndices: selectedLineIndices,
+        selectedLineIndices: persistedSelectedLineIndices,
         artworkImage: artworkImage,
         extractedPalette: extractedPalette,
       );
-      if (!mounted || stepPreview == null) {
+      if (!mounted) {
         return;
+      }
+      if (stepPreview == null) {
+        continue;
       }
       if (stepPreview.action == SnapshotDialogAction.back) {
         continue;
@@ -1414,7 +1417,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     }
 
     final fileName = displayName;
-    final sortedSelectedIndices = selectedLineIndices.toList()..sort();
+    final sortedSelectedIndices = persistedSelectedLineIndices.toList()..sort();
     final metadataToSave = metadata.copyWith(
       useArtworkBackground: preview.useArtworkBackground,
       generatedThemeBrightness:
@@ -1463,12 +1466,13 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     required List<String> lines,
     required Set<int> initialIndexes,
   }) async {
+    final l10n = AppLocalizations.of(context);
     return SnapshotDialogTools.showLineSelectionDialog(
       context: context,
       lines: lines,
       initialIndexes: initialIndexes,
-      title: 'Selecciona la letra',
-      nextLabel: 'Siguiente',
+      title: l10n.snapshotLineSelectionTitle,
+      nextLabel: l10n.next,
     );
   }
 
@@ -1532,13 +1536,14 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         artworkUrl: metadata.artworkUrl,
         selectedColor: selectedColor,
         preloadedArtworkImage: artworkImage,
+        renderScale: 0.95,
       ),
     );
     if (initialBytes == null || initialBytes.isEmpty || !mounted) {
       return null;
     }
 
-    return SnapshotDialogTools.showPreviewDialog(
+    final result = await SnapshotDialogTools.showPreviewDialog(
       context: context,
       initialBytes: initialBytes,
       initialColor: selectedColor,
@@ -1583,9 +1588,47 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             artworkUrl: metadata.artworkUrl,
             selectedColor: color,
             preloadedArtworkImage: artworkImage,
+            renderScale: 0.95,
           ),
         );
       },
+    );
+
+    if (result == null || result.action != SnapshotDialogAction.save) {
+      return result;
+    }
+
+    final finalTheme = SnapshotFlowTools.buildGenerationTheme(
+      baseTheme: theme,
+      brightness: result.generatedBrightness,
+    );
+    final fullBytes = await SnapshotRenderer.buildPng(
+      SnapshotRenderRequest(
+        theme: finalTheme,
+        songTitle: metadata.songTitle,
+        artistName: metadata.artistName,
+        useArtworkBackground: result.useArtworkBackground,
+        lyricsLines: window.lines,
+        activeLineIndex: window.activeLineIndices.isEmpty ? -1 : window.activeLineIndices.first,
+        activeLineIndices: window.activeLineIndices,
+        noLyricsFallback: l10n.snapshotNoLyrics,
+        generatedWithBrand: l10n.snapshotGeneratedWithBrand,
+        artworkUrl: metadata.artworkUrl,
+        selectedColor: result.selectedColor ?? selectedColor,
+        preloadedArtworkImage: artworkImage,
+      ),
+    );
+
+    if (!mounted || fullBytes == null || fullBytes.isEmpty) {
+      return result;
+    }
+
+    return SnapshotDialogResult(
+      pngBytes: fullBytes,
+      selectedColor: result.selectedColor,
+      useArtworkBackground: result.useArtworkBackground,
+      generatedBrightness: result.generatedBrightness,
+      action: result.action,
     );
   }
 
