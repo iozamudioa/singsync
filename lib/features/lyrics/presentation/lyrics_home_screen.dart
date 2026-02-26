@@ -64,6 +64,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   bool _isFavoritesSearchOpen = false;
   final TextEditingController _favoritesSearchController = TextEditingController();
   final FocusNode _favoritesSearchFocusNode = FocusNode();
+  final GlobalKey _galleryNavIconKey = GlobalKey();
   Timer? _sleepTimerTicker;
   DateTime? _sleepTimerEndsAt;
   int? _sleepSongsRemaining;
@@ -1521,6 +1522,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       baseTheme: theme,
       brightness: generatedBrightness,
     );
+    final initialPreviewCardAlpha = generatedBrightness == Brightness.light ? 0.66 : 0.80;
 
     final initialBytes = await SnapshotRenderer.buildPng(
       SnapshotRenderRequest(
@@ -1537,6 +1539,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         selectedColor: selectedColor,
         preloadedArtworkImage: artworkImage,
         renderScale: 0.95,
+        cardSurfaceAlpha: initialPreviewCardAlpha,
       ),
     );
     if (initialBytes == null || initialBytes.isEmpty || !mounted) {
@@ -1574,6 +1577,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
           baseTheme: theme,
           brightness: brightness,
         );
+        final previewCardAlpha = brightness == Brightness.light ? 0.66 : 0.80;
         return SnapshotRenderer.buildPng(
           SnapshotRenderRequest(
             theme: rerenderTheme,
@@ -1589,6 +1593,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             selectedColor: color,
             preloadedArtworkImage: artworkImage,
             renderScale: 0.95,
+            cardSurfaceAlpha: previewCardAlpha,
           ),
         );
       },
@@ -1602,6 +1607,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       baseTheme: theme,
       brightness: result.generatedBrightness,
     );
+    final finalCardAlpha = result.generatedBrightness == Brightness.light ? 0.66 : 0.80;
     final fullBytes = await SnapshotRenderer.buildPng(
       SnapshotRenderRequest(
         theme: finalTheme,
@@ -1616,6 +1622,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         artworkUrl: metadata.artworkUrl,
         selectedColor: result.selectedColor ?? selectedColor,
         preloadedArtworkImage: artworkImage,
+        cardSurfaceAlpha: finalCardAlpha,
       ),
     );
 
@@ -2449,6 +2456,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
               onSearchManually: widget.controller.startManualCandidatesFromNowPlaying,
               onExpandedLandscapeModeChanged: _handleExpandedLandscapeModeChanged,
               onSnapshotSavedToGallery: _handleSnapshotSavedToGallery,
+              snapshotSaveTargetCenterProvider: _galleryNavIconCenter,
             ),
           ),
         ],
@@ -2476,6 +2484,18 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
 
   Future<void> _openPermissionSettings() async {
     await widget.controller.openNotificationListenerSettings();
+  }
+
+  Offset? _galleryNavIconCenter() {
+    final targetContext = _galleryNavIconKey.currentContext;
+    if (targetContext == null) {
+      return null;
+    }
+    final targetBox = targetContext.findRenderObject() as RenderBox?;
+    if (targetBox == null || !targetBox.hasSize) {
+      return null;
+    }
+    return targetBox.localToGlobal(targetBox.size.center(Offset.zero));
   }
 
   Future<void> _checkAndShowPermissionDialog() async {
@@ -2549,23 +2569,23 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                         unawaited(_handleNavTap(index));
                       },
                       labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-                      destinations: const [
-                        NavigationDestination(
+                      destinations: [
+                        const NavigationDestination(
                           icon: Icon(Icons.album_outlined),
                           selectedIcon: Icon(Icons.album_rounded),
                           label: '',
                         ),
                         NavigationDestination(
-                          icon: Icon(Icons.photo_library_outlined),
-                          selectedIcon: Icon(Icons.photo_library_rounded),
+                          icon: Icon(Icons.photo_library_outlined, key: _galleryNavIconKey),
+                          selectedIcon: const Icon(Icons.photo_library_rounded),
                           label: '',
                         ),
-                        NavigationDestination(
+                        const NavigationDestination(
                           icon: Icon(Icons.library_music_outlined),
                           selectedIcon: Icon(Icons.library_music_rounded),
                           label: '',
                         ),
-                        NavigationDestination(
+                        const NavigationDestination(
                           icon: Icon(Icons.more_vert_rounded),
                           selectedIcon: Icon(Icons.more_vert_rounded),
                           label: '',

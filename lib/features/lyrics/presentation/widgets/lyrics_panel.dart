@@ -13,6 +13,40 @@ import '../../../../l10n/app_localizations.dart';
 import 'app_top_feedback.dart';
 import 'snapshot_editor_support.dart';
 
+class LyricsPanelController {
+  Future<void> Function()? _copyAction;
+  Future<void> Function()? _shareAction;
+  Future<void> Function()? _snapshotAction;
+
+  Future<void> copyLyrics() async {
+    await _copyAction?.call();
+  }
+
+  Future<void> shareLyrics() async {
+    await _shareAction?.call();
+  }
+
+  Future<void> shareSnapshot() async {
+    await _snapshotAction?.call();
+  }
+
+  void _bind({
+    required Future<void> Function() onCopy,
+    required Future<void> Function() onShare,
+    required Future<void> Function() onSnapshot,
+  }) {
+    _copyAction = onCopy;
+    _shareAction = onShare;
+    _snapshotAction = onSnapshot;
+  }
+
+  void _unbind() {
+    _copyAction = null;
+    _shareAction = null;
+    _snapshotAction = null;
+  }
+}
+
 class LyricsPanel extends StatefulWidget {
   const LyricsPanel({
     super.key,
@@ -30,6 +64,8 @@ class LyricsPanel extends StatefulWidget {
     this.onScrollDirectionChanged,
     this.onTimedLineTap,
     this.onSnapshotSavedToGallery,
+    this.snapshotSaveTargetCenterProvider,
+    this.controller,
   });
 
   final ThemeData theme;
@@ -46,6 +82,8 @@ class LyricsPanel extends StatefulWidget {
   final ValueChanged<ScrollDirection>? onScrollDirectionChanged;
   final ValueChanged<int>? onTimedLineTap;
   final Future<void> Function()? onSnapshotSavedToGallery;
+  final Offset? Function()? snapshotSaveTargetCenterProvider;
+  final LyricsPanelController? controller;
 
   @override
   State<LyricsPanel> createState() => _LyricsPanelState();
@@ -90,11 +128,24 @@ class _LyricsPanelState extends State<LyricsPanel>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _restoreHeaderWhenNotScrollable();
     });
+    widget.controller?._bind(
+      onCopy: _copyLyrics,
+      onShare: _shareLyrics,
+      onSnapshot: _shareSnapshot,
+    );
   }
 
   @override
   void didUpdateWidget(covariant LyricsPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._unbind();
+      widget.controller?._bind(
+        onCopy: _copyLyrics,
+        onShare: _shareLyrics,
+        onSnapshot: _shareSnapshot,
+      );
+    }
     if (oldWidget.lyrics != widget.lyrics) {
       _timedLines = _parseTimedLyrics(widget.lyrics);
       _lineKeys.clear();
@@ -126,6 +177,7 @@ class _LyricsPanelState extends State<LyricsPanel>
 
   @override
   void dispose() {
+    widget.controller?._unbind();
     WidgetsBinding.instance.removeObserver(this);
     _removeSnapshotOverlay();
     _snapshotCaptureController.dispose();
@@ -172,9 +224,9 @@ class _LyricsPanelState extends State<LyricsPanel>
     }
   }
 
-  Future<void> _copyLyrics(BuildContext context) async {
+  Future<void> _copyLyrics() async {
     await Clipboard.setData(ClipboardData(text: _buildShareableLyrics()));
-    if (!context.mounted) {
+    if (!mounted) {
       return;
     }
 
@@ -388,11 +440,13 @@ class _LyricsPanelState extends State<LyricsPanel>
       required bool artworkBackground,
       required Brightness brightness,
       required double renderScale,
+      bool isPreview = false,
     }) {
       final generationTheme = SnapshotFlowTools.buildGenerationTheme(
         baseTheme: widget.theme,
         brightness: brightness,
       );
+      final previewCardAlpha = brightness == Brightness.light ? 0.66 : 0.80;
       return SnapshotRenderer.buildPng(
         SnapshotRenderRequest(
           theme: generationTheme,
@@ -408,6 +462,7 @@ class _LyricsPanelState extends State<LyricsPanel>
           selectedColor: color,
           preloadedArtworkImage: artworkImage,
           renderScale: renderScale,
+          cardSurfaceAlpha: isPreview ? previewCardAlpha : 0.80,
         ),
       );
     }
@@ -417,6 +472,7 @@ class _LyricsPanelState extends State<LyricsPanel>
       artworkBackground: useArtworkBackground,
       brightness: generatedBrightness,
       renderScale: 0.95,
+      isPreview: true,
     );
     if (previewResult == null || previewResult.isEmpty || !mounted) {
       return null;
@@ -464,6 +520,7 @@ class _LyricsPanelState extends State<LyricsPanel>
           artworkBackground: shouldUseArtworkBackground,
           brightness: brightness,
           renderScale: 0.95,
+          isPreview: true,
         );
       },
     );
@@ -476,6 +533,7 @@ class _LyricsPanelState extends State<LyricsPanel>
       artworkBackground: result.useArtworkBackground,
       brightness: result.generatedBrightness,
       renderScale: 2.2,
+      isPreview: true,
     );
     if (!mounted || fullBytes == null || fullBytes.isEmpty) {
       return result;
@@ -536,14 +594,27 @@ class _LyricsPanelState extends State<LyricsPanel>
     required Future<Uint8List?> previewBytesFuture,
   }) async {
     final stackContext = _panelStackKey.currentContext;
-    final captureContext = _captureButtonKey.currentContext;
-    if (stackContext == null || captureContext == null) {
+    if (stackContext == null) {
       return;
     }
 
     final stackBox = stackContext.findRenderObject() as RenderBox?;
-    final captureBox = captureContext.findRenderObject() as RenderBox?;
-    if (stackBox == null || captureBox == null) {
+    if (stackBox == null) {
+      return;
+    }
+
+    final providedTargetCenter = widget.snapshotSaveTargetCenterProvider?.call();
+    Offset? captureCenter;
+    if (providedTargetCenter == null) {
+      final captureContext = _captureButtonKey.currentContext;
+      final captureBox = captureContext?.findRenderObject() as RenderBox?;
+      if (captureBox != null) {
+        captureCenter = captureBox.localToGlobal(captureBox.size.center(Offset.zero));
+      }
+    }
+
+    final endCenter = providedTargetCenter ?? captureCenter;
+    if (endCenter == null) {
       return;
     }
 
@@ -553,14 +624,13 @@ class _LyricsPanelState extends State<LyricsPanel>
     }
 
     final stackSize = stackBox.size;
-    final captureCenter = captureBox.localToGlobal(captureBox.size.center(Offset.zero));
     final startCenter = stackBox.localToGlobal(Offset(stackSize.width / 2, stackSize.height * 0.46));
 
     _removeSnapshotOverlay();
 
     setState(() {
       _snapshotStartCenter = startCenter;
-      _snapshotEndCenter = captureCenter;
+      _snapshotEndCenter = endCenter;
       _isSnapshotAnimating = true;
     });
 
@@ -1046,7 +1116,7 @@ class _LyricsPanelState extends State<LyricsPanel>
                   children: [
                     IconButton(
                       style: _actionButtonStyle(widget.theme),
-                      onPressed: () => _copyLyrics(context),
+                      onPressed: _copyLyrics,
                       tooltip: l10n.copy,
                       icon: const Icon(Icons.copy_all_rounded),
                     ),

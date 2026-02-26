@@ -83,10 +83,12 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
     final controller = widget.controller;
     final packageName = controller.nowPlayingSourcePackage ?? controller.preferredMediaAppPackage;
     final l10n = AppLocalizations.of(context);
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    final resolvedIconSize = iconSize ?? (shortestSide >= 700 ? 40.0 : 34.0);
     return IconButton(
-      iconSize: iconSize,
+      iconSize: resolvedIconSize,
       onPressed: controller.openActivePlayer,
-      icon: _activePlayerIconWidget(packageName, iconSize: iconSize),
+      icon: _activePlayerIconWidget(packageName, iconSize: resolvedIconSize),
       tooltip: l10n.openActivePlayer,
     );
   }
@@ -141,12 +143,8 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
     final controller = widget.controller;
     final l10n = AppLocalizations.of(context);
     final shortestSide = MediaQuery.of(context).size.shortestSide;
-    final iconSize = iconSizeOverride ??
-        (shortestSide >= 700
-            ? 36.0
-            : shortestSide >= 500
-                ? 33.0
-                : 30.0);
+    final iconSize = iconSizeOverride ?? (shortestSide >= 700 ? 42.0 : 36.0);
+    final playIconSize = iconSize + 4;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -160,8 +158,8 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
         SizedBox(width: spacing),
         IconButton(
           onPressed: controller.mediaPlayPause,
-          iconSize: iconSize,
-          splashRadius: iconSize * 0.8,
+          iconSize: playIconSize,
+          splashRadius: playIconSize * 0.8,
           icon: const Icon(Icons.play_arrow_rounded),
           tooltip: l10n.playPause,
         ),
@@ -306,6 +304,7 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
                           : null,
                       onCopyFeedbackVisibleChanged: _handleCopyFeedbackVisibility,
                       onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
+                      snapshotSaveTargetCenterProvider: widget.snapshotSaveTargetCenterProvider,
                       onTap: controller.retrySearchLyricsIfNeeded,
                       onScrollDirectionChanged: _handleLyricsScrollDirection,
                     ),

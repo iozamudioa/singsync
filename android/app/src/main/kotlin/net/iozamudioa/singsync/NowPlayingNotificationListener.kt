@@ -26,7 +26,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 
-class PixelNowPlayingNotificationListener : NotificationListenerService() {
+class NowPlayingNotificationListener : NotificationListenerService() {
     private var lastEventKey: String? = null
     private lateinit var artistMemoryStore: ArtistMemoryStore
 
@@ -88,7 +88,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
 
     private fun isAnyPlaybackActive(): Boolean {
         val manager = getSystemService(MediaSessionManager::class.java) ?: return false
-        val component = ComponentName(this, PixelNowPlayingNotificationListener::class.java)
+        val component = ComponentName(this, NowPlayingNotificationListener::class.java)
         val sessions = try {
             manager.getActiveSessions(component)
         } catch (_: SecurityException) {
@@ -177,7 +177,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
 
     private fun findBestMediaController(sourcePackage: String?): MediaController? {
         val manager = getSystemService(MediaSessionManager::class.java) ?: return null
-        val component = ComponentName(this, PixelNowPlayingNotificationListener::class.java)
+        val component = ComponentName(this, NowPlayingNotificationListener::class.java)
         val sessions = try {
             manager.getActiveSessions(component)
         } catch (_: SecurityException) {
@@ -730,6 +730,9 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
         extras: Bundle,
         packageName: String,
     ): NowPlayingPayload? {
+        val controller = findBestMediaController(packageName)
+        val metadata = controller?.metadata
+
         val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)
             ?.toString()
             ?.trim()
@@ -751,25 +754,46 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             ?.trim()
             .orEmpty()
 
-        val titleCandidates = listOf(rawBigTitle, rawTitle)
-            .filter { it.isNotBlank() && !looksLikeHelperText(it) }
-        val artistCandidates = listOf(rawText, rawSubText, rawBigText)
+        fun metadataText(key: String): String {
+            return metadata?.getText(key)
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+        }
+
+        val titleCandidates = listOf(
+            metadataText(MediaMetadata.METADATA_KEY_TITLE),
+            metadataText(MediaMetadata.METADATA_KEY_DISPLAY_TITLE),
+            metadata?.description?.title?.toString()?.trim().orEmpty(),
+            rawBigTitle,
+            rawTitle,
+        )
             .filter { it.isNotBlank() && !looksLikeHelperText(it) }
 
-        val parsed = (titleCandidates + artistCandidates)
-            .asSequence()
-            .mapNotNull { parseSongArtistFlexible(it) }
-            .firstOrNull()
+        val resolvedTitle = titleCandidates.firstOrNull().orEmpty()
 
-        val title = parsed?.first
-            ?: titleCandidates.firstOrNull()
+        val artistCandidates = listOf(
+            metadataText(MediaMetadata.METADATA_KEY_ARTIST),
+            metadataText(MediaMetadata.METADATA_KEY_ALBUM_ARTIST),
+            metadataText(MediaMetadata.METADATA_KEY_AUTHOR),
+            metadataText(MediaMetadata.METADATA_KEY_WRITER),
+            metadataText(MediaMetadata.METADATA_KEY_COMPOSER),
+            metadata?.description?.subtitle?.toString()?.trim().orEmpty(),
+            rawText,
+            rawSubText,
+            rawBigText,
+        )
+            .filter { it.isNotBlank() && !looksLikeHelperText(it) }
+
+        val title = resolvedTitle
             ?: rawText.takeUnless { looksLikeHelperText(it) }
             ?: rawSubText.takeUnless { looksLikeHelperText(it) }
             ?: rawBigText.takeUnless { looksLikeHelperText(it) }
             ?: ""
 
-        val artist = parsed?.second
-            ?: artistCandidates.firstOrNull()
+        val artist = artistCandidates.firstOrNull {
+            !it.equals(title, ignoreCase = true)
+        }
             ?: UNKNOWN_ARTIST
 
         if (title.isBlank()) {
@@ -1267,7 +1291,7 @@ class PixelNowPlayingNotificationListener : NotificationListenerService() {
             "com.google.android.apps.pixel.nowplaying",
         )
         @Volatile
-        private var activeInstance: PixelNowPlayingNotificationListener? = null
+        private var activeInstance: NowPlayingNotificationListener? = null
         @Volatile
         private var lastPayload: Map<String, String>? = null
 

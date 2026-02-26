@@ -50,11 +50,11 @@ class MainActivity: FlutterActivity() {
 				"getActiveSessionSnapshot" -> {
 					val sourcePackage = call.argument<String>("sourcePackage")
 					result.success(
-						PixelNowPlayingNotificationListener.getActiveSessionSnapshot(sourcePackage),
+						NowPlayingNotificationListener.getActiveSessionSnapshot(sourcePackage),
 					)
 				}
 				"getCurrentNowPlaying" -> {
-					val payload = PixelNowPlayingNotificationListener.getCurrentNowPlaying()
+					val payload = NowPlayingNotificationListener.getCurrentNowPlaying()
 					result.success(payload)
 				}
 				"openActivePlayer" -> {
@@ -62,7 +62,7 @@ class MainActivity: FlutterActivity() {
 					val selectedPackage = call.argument<String>("selectedPackage")
 					val searchQuery = call.argument<String>("searchQuery")
 					result.success(
-						PixelNowPlayingNotificationListener.openActivePlayer(
+						NowPlayingNotificationListener.openActivePlayer(
 							sourcePackage = sourcePackage,
 							selectedPackage = selectedPackage,
 							searchQuery = searchQuery,
@@ -72,25 +72,25 @@ class MainActivity: FlutterActivity() {
 				"mediaPrevious" -> {
 					val sourcePackage = call.argument<String>("sourcePackage")
 					result.success(
-						PixelNowPlayingNotificationListener.controlMedia("previous", sourcePackage),
+						NowPlayingNotificationListener.controlMedia("previous", sourcePackage),
 					)
 				}
 				"mediaPlayPause" -> {
 					val sourcePackage = call.argument<String>("sourcePackage")
 					result.success(
-						PixelNowPlayingNotificationListener.controlMedia("play_pause", sourcePackage),
+						NowPlayingNotificationListener.controlMedia("play_pause", sourcePackage),
 					)
 				}
 				"mediaNext" -> {
 					val sourcePackage = call.argument<String>("sourcePackage")
-					result.success(PixelNowPlayingNotificationListener.controlMedia("next", sourcePackage))
+					result.success(NowPlayingNotificationListener.controlMedia("next", sourcePackage))
 				}
 				"mediaSeekTo" -> {
 					val sourcePackage = call.argument<String>("sourcePackage")
 					val positionRaw = call.argument<Number>("positionMs")
 					val positionMs = positionRaw?.toLong() ?: -1L
 					result.success(
-						PixelNowPlayingNotificationListener.seekMediaTo(
+						NowPlayingNotificationListener.seekMediaTo(
 							positionMs = positionMs,
 							sourcePackage = sourcePackage,
 						),
@@ -99,7 +99,7 @@ class MainActivity: FlutterActivity() {
 				"getMediaPlaybackState" -> {
 					val sourcePackage = call.argument<String>("sourcePackage")
 					result.success(
-						PixelNowPlayingNotificationListener.getMediaPlaybackState(sourcePackage),
+						NowPlayingNotificationListener.getMediaPlaybackState(sourcePackage),
 					)
 				}
 				"isNotificationListenerEnabled" -> {
@@ -371,7 +371,7 @@ class MainActivity: FlutterActivity() {
 			return false
 		}
 
-		val me = ComponentName(this, PixelNowPlayingNotificationListener::class.java).flattenToString()
+		val me = ComponentName(this, NowPlayingNotificationListener::class.java).flattenToString()
 		return flat.split(':').any { it.equals(me, ignoreCase = true) }
 	}
 

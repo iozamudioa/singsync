@@ -162,6 +162,7 @@ class SnapshotRenderRequest {
     this.selectedColor,
     this.preloadedArtworkImage,
     this.renderScale = 2.2,
+    this.cardSurfaceAlpha = 0.80,
   });
 
   final ThemeData theme;
@@ -177,6 +178,7 @@ class SnapshotRenderRequest {
   final Color? selectedColor;
   final ui.Image? preloadedArtworkImage;
   final double renderScale;
+  final double cardSurfaceAlpha;
 }
 
 class SnapshotArtworkTools {
@@ -765,9 +767,10 @@ class SnapshotRenderer {
       const Rect.fromLTWH(70, 70, baseWidth - 140, baseHeight - 140),
       const Radius.circular(42),
     );
+    final cardAlpha = request.cardSurfaceAlpha.clamp(0.35, 0.92);
     canvas.drawRRect(
       cardRect,
-      Paint()..color = theme.colorScheme.surface.withValues(alpha: 0.80),
+      Paint()..color = theme.colorScheme.surface.withValues(alpha: cardAlpha),
     );
 
     const centerX = baseWidth / 2;
@@ -1215,8 +1218,8 @@ class _SnapshotPreviewDialogState extends State<_SnapshotPreviewDialog> {
             : widget.darkThemeLabel,
         icon: Icon(
           _generatedBrightness == Brightness.dark
-              ? Icons.nightlight_round
-              : Icons.wb_sunny_rounded,
+              ? Icons.wb_sunny_rounded
+              : Icons.nightlight_round,
         ),
       );
     }

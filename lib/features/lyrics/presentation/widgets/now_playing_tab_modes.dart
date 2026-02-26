@@ -34,7 +34,9 @@ extension _NowPlayingTabModes on _NowPlayingTabState {
     Widget buildRightControlsColumn() {
       if (hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer) {
         final shortestSide = math.min(constraints.maxWidth, constraints.maxHeight);
-        final iconSize = shortestSide >= 700 ? 42.0 : 36.0;
+        final iconSize = shortestSide >= 700
+            ? (isLandscape ? 48.0 : 42.0)
+            : (isLandscape ? 42.0 : 36.0);
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,

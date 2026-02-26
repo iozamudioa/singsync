@@ -34,6 +34,7 @@ class NowPlayingTab extends StatefulWidget {
     required this.onSearchManually,
     this.onExpandedLandscapeModeChanged,
     this.onSnapshotSavedToGallery,
+    this.snapshotSaveTargetCenterProvider,
   });
 
   final LyricsController controller;
@@ -44,6 +45,7 @@ class NowPlayingTab extends StatefulWidget {
   final VoidCallback onSearchManually;
   final ValueChanged<bool>? onExpandedLandscapeModeChanged;
   final Future<void> Function()? onSnapshotSavedToGallery;
+  final Offset? Function()? snapshotSaveTargetCenterProvider;
 
   @override
   State<NowPlayingTab> createState() => _NowPlayingTabState();
@@ -88,6 +90,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
     'net.iozamudioa.singsync/now_playing_methods',
   );
   final Map<String, Future<Uint8List?>> _playerIconFutureByPackage = <String, Future<Uint8List?>>{};
+  final LyricsPanelController _collapsedLandscapeLyricsPanelController = LyricsPanelController();
   Timer? _autoExpandVinylTimer;
   String? _autoExpandPendingKey;
   String? _autoExpandedForKey;
@@ -742,136 +745,213 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                             ? KeyedSubtree(
                                 key: const ValueKey('collapsed_landscape'),
                                 child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(
-                              width: math.min(420, constraints.maxWidth * 0.46),
-                              child: LayoutBuilder(
-                                builder: (context, sideConstraints) {
-                                  final artworkSize = math.min(
-                                    420.0,
-                                    math.max(280.0, sideConstraints.maxHeight * 0.66),
-                                  );
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      flex: 40,
+                                      child: LayoutBuilder(
+                                        builder: (context, sideConstraints) {
+                                          final artworkSize = math.min(
+                                            sideConstraints.maxWidth,
+                                            sideConstraints.maxHeight * 0.96,
+                                          );
 
-                                  return Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
-                                      const SizedBox(height: 12),
-                                      AnimatedCrossFade(
-                                        duration: const Duration(milliseconds: 220),
-                                        firstCurve: Curves.easeOut,
-                                        secondCurve: Curves.easeOut,
-                                        sizeCurve: Curves.easeOut,
-                                        crossFadeState: _isNowPlayingHeaderVisible
-                                            ? CrossFadeState.showFirst
-                                            : CrossFadeState.showSecond,
-                                        firstChild: Column(
-                                          children: [
-                                            Center(
-                                              child: _ArtworkCover(
-                                                url: controller.isAdLikeNowPlaying
-                                                    ? null
-                                                    : controller.nowPlayingArtworkUrl,
-                                                trackTitle: controller.songTitle,
-                                                size: artworkSize,
-                                                isSpinning: controller.isNowPlayingPlaybackActive,
-                                                spinAnimation: _vinylSpinController,
-                                                seekOffsetTurns: _seekNudgeTurns,
-                                                seekCarryTurns: _seekCarryTurns,
-                                                canScrub: _canScrubVinyl,
-                                                onTouchActiveChanged: _onVinylTouchActiveChanged,
-                                                onScrubStart: _onVinylScrubStart,
-                                                onScrubUpdate: _onVinylScrubUpdate,
-                                                onScrubEnd: _onVinylScrubEnd,
-                                                centerIcon: controller.isAdLikeNowPlaying
-                                                    ? _activePlayerIcon(
-                                                        controller.nowPlayingSourcePackage ??
-                                                            controller.preferredMediaAppPackage,
-                                                      )
-                                                    : null,
-                                                onTap: _toggleVinylExpanded,
+                                          return Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              AnimatedCrossFade(
+                                                duration: const Duration(milliseconds: 220),
+                                                firstCurve: Curves.easeOut,
+                                                secondCurve: Curves.easeOut,
+                                                sizeCurve: Curves.easeOut,
+                                                crossFadeState: _isNowPlayingHeaderVisible
+                                                    ? CrossFadeState.showFirst
+                                                    : CrossFadeState.showSecond,
+                                                firstChild: _ArtworkCover(
+                                                  url: controller.isAdLikeNowPlaying
+                                                      ? null
+                                                      : controller.nowPlayingArtworkUrl,
+                                                  trackTitle: controller.songTitle,
+                                                  size: artworkSize,
+                                                  isSpinning: controller.isNowPlayingPlaybackActive,
+                                                  spinAnimation: _vinylSpinController,
+                                                  seekOffsetTurns: _seekNudgeTurns,
+                                                  seekCarryTurns: _seekCarryTurns,
+                                                  canScrub: _canScrubVinyl,
+                                                  onTouchActiveChanged: _onVinylTouchActiveChanged,
+                                                  onScrubStart: _onVinylScrubStart,
+                                                  onScrubUpdate: _onVinylScrubUpdate,
+                                                  onScrubEnd: _onVinylScrubEnd,
+                                                  centerIcon: controller.isAdLikeNowPlaying
+                                                      ? _activePlayerIcon(
+                                                          controller.nowPlayingSourcePackage ??
+                                                              controller.preferredMediaAppPackage,
+                                                        )
+                                                      : null,
+                                                  onTap: _toggleVinylExpanded,
+                                                ),
+                                                secondChild: const SizedBox.shrink(),
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      flex: 40,
+                                      child: controller.isManualSearchMode
+                                          ? _manualSearchArea()
+                                          : LyricsPanel(
+                                              controller: _collapsedLandscapeLyricsPanelController,
+                                              theme: theme,
+                                              lyrics: controller.nowPlayingLyrics,
+                                              useArtworkBackground: widget.useArtworkBackground,
+                                              playbackPositionMs: controller.nowPlayingPlaybackPositionMs,
+                                              songTitle: controller.songTitle,
+                                              artistName: controller.artistName,
+                                              artworkUrl: controller.nowPlayingArtworkUrl,
+                                              onTimedLineTap: _onNowPlayingTimedLineTap,
+                                              showActionButtons: false,
+                                              onCopyFeedbackVisibleChanged: _handleCopyFeedbackVisibility,
+                                              onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
+                                              snapshotSaveTargetCenterProvider:
+                                                  widget.snapshotSaveTargetCenterProvider,
+                                              onTap: controller.onNowPlayingLyricsTap,
+                                              onScrollDirectionChanged: null,
+                                            ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      flex: 20,
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                                        children: [
+                                          Expanded(
+                                            child: Center(
+                                              child: hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer
+                                                  ? LayoutBuilder(
+                                                      builder: (context, controlConstraints) {
+                                                        final shortestSide = math.min(
+                                                          controlConstraints.maxWidth,
+                                                          constraints.maxHeight,
+                                                        );
+                                                        final iconSize = shortestSide >= 700 ? 48.0 : 42.0;
+
+                                                        return Column(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            _buildPlayerControlsRow(
+                                                              iconSizeOverride: iconSize,
+                                                              spacing: 2,
+                                                            ),
+                                                            const SizedBox(height: 10),
+                                                            _buildActivePlayerButton(iconSize: iconSize - 2),
+                                                            if (controller.canShowManualSearchButton) ...[
+                                                              const SizedBox(height: 10),
+                                                              OutlinedButton.icon(
+                                                                onPressed: _onSearchManuallyPressed,
+                                                                icon: const MusicSearchIcon(size: 20),
+                                                                label: Text(
+                                                                  AppLocalizations.of(context).searchManually,
+                                                                ),
+                                                              ),
+                                                            ],
+                                                            if (controller.isLoadingNowPlayingLyrics)
+                                                              const Padding(
+                                                                padding: EdgeInsets.only(top: 12),
+                                                                child: LinearProgressIndicator(),
+                                                              ),
+                                                            if (controller.isSearchingLyrics)
+                                                              const Padding(
+                                                                padding: EdgeInsets.only(top: 12),
+                                                                child: LinearProgressIndicator(),
+                                                              ),
+                                                          ],
+                                                        );
+                                                      },
+                                                    )
+                                                  : (hasActiveNowPlaying || canOpenMediaApps)
+                                                      ? Column(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          children: [
+                                                            _buildPlatformButtonsRow(artistOnly: false),
+                                                            if (controller.canResumePausedPlaybackAfterFavorite) ...[
+                                                              const SizedBox(height: 10),
+                                                              _buildResumePausedPlaybackButton(),
+                                                            ],
+                                                            const SizedBox(height: 10),
+                                                            if (controller.canShowManualSearchButton)
+                                                              OutlinedButton.icon(
+                                                                onPressed: _onSearchManuallyPressed,
+                                                                icon: const MusicSearchIcon(size: 20),
+                                                                label: Text(
+                                                                  AppLocalizations.of(context).searchManually,
+                                                                ),
+                                                              ),
+                                                          ],
+                                                        )
+                                                      : const SizedBox.shrink(),
+                                            ),
+                                          ),
+                                          if (controller.hasActiveNowPlayingLyrics)
+                                            Align(
+                                              alignment: Alignment.bottomRight,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  IconButton(
+                                                    style: IconButton.styleFrom(
+                                                      backgroundColor: theme.colorScheme.surface.withValues(
+                                                        alpha: 0.32,
+                                                      ),
+                                                      foregroundColor: theme.colorScheme.onSurface,
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(12),
+                                                      ),
+                                                    ),
+                                                    onPressed: _collapsedLandscapeLyricsPanelController.copyLyrics,
+                                                    tooltip: AppLocalizations.of(context).copy,
+                                                    icon: const Icon(Icons.copy_all_rounded),
+                                                  ),
+                                                  IconButton(
+                                                    style: IconButton.styleFrom(
+                                                      backgroundColor: theme.colorScheme.surface.withValues(
+                                                        alpha: 0.32,
+                                                      ),
+                                                      foregroundColor: theme.colorScheme.onSurface,
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(12),
+                                                      ),
+                                                    ),
+                                                    onPressed: _collapsedLandscapeLyricsPanelController.shareLyrics,
+                                                    tooltip: AppLocalizations.of(context).share,
+                                                    icon: const Icon(Icons.share_rounded),
+                                                  ),
+                                                  IconButton(
+                                                    style: IconButton.styleFrom(
+                                                      backgroundColor: theme.colorScheme.surface.withValues(
+                                                        alpha: 0.32,
+                                                      ),
+                                                      foregroundColor: theme.colorScheme.onSurface,
+                                                      shape: RoundedRectangleBorder(
+                                                        borderRadius: BorderRadius.circular(12),
+                                                      ),
+                                                    ),
+                                                    onPressed:
+                                                        _collapsedLandscapeLyricsPanelController.shareSnapshot,
+                                                    tooltip: AppLocalizations.of(context).shareSnapshot,
+                                                    icon: const Icon(Icons.photo_camera_outlined),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                            const SizedBox(height: 8),
-                                          ],
-                                        ),
-                                        secondChild: const SizedBox.shrink(),
+                                          const SizedBox(height: 4),
+                                        ],
                                       ),
-                                      Expanded(
-                                        child: hasActiveNowPlaying && controller.isNowPlayingFromMediaPlayer
-                                            ? Column(
-                                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                                children: [
-                                                  _buildPlayerControlsRow(),
-                                                  _buildActivePlayerButton(),
-                                                  if (controller.canShowManualSearchButton)
-                                                    OutlinedButton.icon(
-                                                      onPressed: _onSearchManuallyPressed,
-                                                      icon: const MusicSearchIcon(size: 20),
-                                                      label: Text(AppLocalizations.of(context).searchManually),
-                                                    ),
-                                                ],
-                                              )
-                                            : (hasActiveNowPlaying || canOpenMediaApps)
-                                                ? Center(
-                                                child: Column(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    _buildPlatformButtonsRow(artistOnly: false),
-                                                    if (controller.canResumePausedPlaybackAfterFavorite) ...[
-                                                      const SizedBox(height: 10),
-                                                      _buildResumePausedPlaybackButton(),
-                                                    ],
-                                                    const SizedBox(height: 10),
-                                                    if (controller.canShowManualSearchButton)
-                                                      OutlinedButton.icon(
-                                                        onPressed: _onSearchManuallyPressed,
-                                                        icon: const MusicSearchIcon(size: 20),
-                                                        label: Text(AppLocalizations.of(context).searchManually),
-                                                      ),
-                                                  ],
-                                                ),
-                                              )
-                                                : const SizedBox.shrink(),
-                                      ),
-                                      if (controller.isLoadingNowPlayingLyrics)
-                                        const Padding(
-                                          padding: EdgeInsets.only(top: 12),
-                                          child: LinearProgressIndicator(),
-                                        ),
-                                      if (controller.isSearchingLyrics)
-                                        const Padding(
-                                          padding: EdgeInsets.only(top: 12),
-                                          child: LinearProgressIndicator(),
-                                        ),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: controller.isManualSearchMode
-                                  ? _manualSearchArea()
-                                  : LyricsPanel(
-                                      theme: theme,
-                                      lyrics: controller.nowPlayingLyrics,
-                                      useArtworkBackground: widget.useArtworkBackground,
-                                      playbackPositionMs: controller.nowPlayingPlaybackPositionMs,
-                                      songTitle: controller.songTitle,
-                                      artistName: controller.artistName,
-                                      artworkUrl: controller.nowPlayingArtworkUrl,
-                                        onTimedLineTap: _onNowPlayingTimedLineTap,
-                                      showActionButtons: controller.hasActiveNowPlayingLyrics,
-                                      onCopyFeedbackVisibleChanged:
-                                          _handleCopyFeedbackVisibility,
-                                      onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
-                                      onTap: controller.onNowPlayingLyricsTap,
-                                      onScrollDirectionChanged: null,
                                     ),
-                            ),
-                          ],
-                          ),
+                                  ],
+                                ),
                               )
                             : KeyedSubtree(
                                 key: const ValueKey('collapsed_portrait'),
@@ -967,6 +1047,8 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
                                       onCopyFeedbackVisibleChanged:
                                           _handleCopyFeedbackVisibility,
                                       onSnapshotSavedToGallery: widget.onSnapshotSavedToGallery,
+                                        snapshotSaveTargetCenterProvider:
+                                          widget.snapshotSaveTargetCenterProvider,
                                       onTap: controller.onNowPlayingLyricsTap,
                                       onScrollDirectionChanged: _handleLyricsScrollDirection,
                                     ),
