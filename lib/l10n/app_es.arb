@@ -4,6 +4,7 @@
   "nowPlayingDefaultTitle": "Now Playing",
   "unknownArtist": "Artista desconocido",
   "artistLabel": "Artista",
+  "favoritesLabel": "Favoritos",
   "motivationStartPlayback": "Pon tu canción favorita y empezamos 🎵",
   "permissionNeededTitle": "Permiso necesario",
   "permissionDialogMessage": "SingSync necesita acceso a notificaciones para detectar la canción actual y buscar su letra automáticamente.",
@@ -90,12 +91,12 @@
   "removeFromFavorites": "Quitar de favoritos",
   "favoritesLibrary": "Biblioteca",
   "mySongsTitle": "Mis canciones",
-  "catchemTitle": "Catchem",
+  "catchemTitle": "Bitácora musical",
   "searchBySongOrArtist": "Buscar por canción o artista",
   "noResults": "Sin resultados",
   "noFavoritesYet": "No hay favoritos aún",
-  "noCatchemYet": "Aún no has atrapado canciones",
-  "catchemDeleted": "Canción eliminada de Catchem",
+  "noCatchemYet": "Aún no hay canciones en tu bitácora musical",
+  "catchemDeleted": "Canción eliminada de la bitácora musical",
   "catchemDetectionCount": "{count, plural, =1{# escucha} other{# escuchas}}",
   "@catchemDetectionCount": {
     "placeholders": {
@@ -172,6 +173,22 @@
   "retryingMatches": "Reintentando coincidencias en lrclib...",
   "lrclibUnavailable": "No fue posible consultar lrclib en este momento.",
   "todayLabel": "Hoy",
+  "yesterdayLabel": "Ayer",
+  "thisMonthLabel": "Este mes",
+  "loadMoreLabel": "Ver más",
+  "catchemPlayedSongsCount": "{count, plural, =1{# canción reproducida} other{# canciones reproducidas}}",
+  "@catchemPlayedSongsCount": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "catchemNoPlaybackHistoryYet": "Sin reproducciones registradas todavía",
+  "catchemObsessionCaught": "Cancion atrapada 🕵️",
+  "catchemObsessionRadar": "En el radar 🛰️",
+  "catchemObsessionLoop": "En bucle infinito 🔄",
+  "catchemObsessionToday": "Obsesión del día 🔥",
+  "catchemChoosePlayerTitle": "Elegir reproductor",
+  "catchemNoPlayersAvailable": "No hay reproductores instalados disponibles",
   "thisWeekLabel": "Esta semana",
   "olderLabel": "Anteriores",
   "sleepTimerMenuTitle": "Temporizador de apagado",

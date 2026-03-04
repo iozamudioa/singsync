@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -51,6 +52,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   int _activeNavIndex = 0;
   VoidCallback? _openInfoModalAction;
   final Map<String, Future<Uint8List?>> _snapshotBytesFutureByUri = <String, Future<Uint8List?>>{};
+  final Map<String, Future<Uint8List?>> _mediaAppIconFutureByPackage = <String, Future<Uint8List?>>{};
   final Map<String, DateTime> _savedSnapshotDateByUri = <String, DateTime>{};
   final Map<String, String> _savedSnapshotDisplayNameByUri = <String, String>{};
   final Map<String, String> _savedSnapshotTitleByUri = <String, String>{};
@@ -66,8 +68,19 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   final TextEditingController _gallerySearchController = TextEditingController();
   final FocusNode _gallerySearchFocusNode = FocusNode();
   bool _isFavoritesSearchOpen = false;
+  bool _groupCatchemByArtist = false;
+  bool _groupCatchemByAlbum = false;
+  bool _groupCatchemByNowPlaying = false;
+  bool _showOnlyCatchemFavorites = false;
   final TextEditingController _favoritesSearchController = TextEditingController();
   final FocusNode _favoritesSearchFocusNode = FocusNode();
+  final ScrollController _catchemScrollController = ScrollController();
+  final Map<String, Timer> _pendingCatchemDeleteTimers = <String, Timer>{};
+  final Map<String, CatchemSongEntry> _pendingCatchemDeleteEntries = <String, CatchemSongEntry>{};
+  int _lastTodayAutoLoadAtMs = 0;
+  final Set<String> _expandedCatchemMonths = <String>{};
+  final Set<int> _expandedCatchemYears = <int>{};
+  final Set<String> _expandedCatchemYearMonths = <String>{};
   final GlobalKey _galleryNavIconKey = GlobalKey();
   Timer? _sleepTimerTicker;
   DateTime? _sleepTimerEndsAt;
@@ -89,6 +102,137 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     }
 
     return NetworkImage(artworkUrl);
+  }
+
+  Future<Uint8List?> _loadMediaAppIconBytes(String packageName) async {
+    final normalizedPackage = packageName.trim();
+    if (normalizedPackage.isEmpty) {
+      return null;
+    }
+
+    try {
+      final bytes = await _nowPlayingMethodsChannel.invokeMethod<dynamic>(
+        'getMediaAppIcon',
+        {
+          'packageName': normalizedPackage,
+          'maxPx': 112,
+        },
+      );
+      if (bytes is Uint8List) {
+        return bytes;
+      }
+      if (bytes is List<int>) {
+        return Uint8List.fromList(bytes);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _buildMediaSourceIcon(String? packageName, {double size = 20}) {
+    final normalizedPackage = (packageName ?? '').trim();
+    final fallback = Icon(
+      Icons.music_note_rounded,
+      size: size,
+    );
+    if (normalizedPackage.isEmpty) {
+      return fallback;
+    }
+
+    final iconFuture = _mediaAppIconFutureByPackage.putIfAbsent(
+      normalizedPackage,
+      () => _loadMediaAppIconBytes(normalizedPackage),
+    );
+
+    return FutureBuilder<Uint8List?>(
+      future: iconFuture,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) {
+          return fallback;
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(5),
+          child: Image.memory(
+            bytes,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+          ),
+        );
+      },
+    );
+  }
+
+  String _mediaPlayerLabelForPackage(AppLocalizations l10n, String packageName) {
+    switch (packageName) {
+      case 'com.spotify.music':
+        return l10n.spotifyLabel;
+      case 'com.google.android.apps.youtube.music':
+        return l10n.youtubeMusicLabel;
+      case 'com.amazon.mp3':
+        return l10n.amazonMusicLabel;
+      case 'com.apple.android.music':
+        return l10n.appleMusicLabel;
+      default:
+        return packageName;
+    }
+  }
+
+  Future<void> _openCatchemPlayer(CatchemSongEntry entry) async {
+    final l10n = AppLocalizations.of(context);
+    final sourceType = entry.sourceType.trim().toLowerCase();
+    final hasSourcePackage = (entry.sourcePackage ?? '').trim().isNotEmpty;
+
+    if (sourceType == 'pixel_now_playing' || !hasSourcePackage) {
+      final installed = widget.controller.installedMediaAppPackages;
+      final available = LyricsController.knownMediaAppPackages
+          .where(installed.contains)
+          .toList(growable: false);
+
+      if (available.isEmpty) {
+        AppTopFeedback.show(context, l10n.catchemNoPlayersAvailable);
+        return;
+      }
+
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        builder: (sheetContext) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: Text(l10n.catchemChoosePlayerTitle),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: l10n.close,
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                ),
+              ),
+              ...available.map(
+                (packageName) => ListTile(
+                  leading: _buildMediaSourceIcon(packageName, size: 22),
+                  title: Text(_mediaPlayerLabelForPackage(l10n, packageName)),
+                  onTap: () async {
+                    Navigator.of(sheetContext).pop();
+                    await widget.controller.openCatchemEntryInPlayer(
+                      entry: entry,
+                      selectedPackage: packageName,
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          );
+        },
+      );
+      return;
+    }
+
+    await widget.controller.openCatchemEntryInPlayer(entry: entry);
   }
 
   Future<void> _handleSnapshotSavedToGallery() async {
@@ -131,11 +275,17 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   }
 
   Future<void> _handleNavTap(int index) async {
-    if (index == 0 || index == 1 || index == 2) {
+    final hasSnapshotsDestination = _savedSnapshotUris.isNotEmpty;
+    const homeIndex = 0;
+    final galleryIndex = hasSnapshotsDestination ? 1 : -1;
+    final mySongsIndex = hasSnapshotsDestination ? 2 : 1;
+    final moreIndex = hasSnapshotsDestination ? 3 : 2;
+
+    if (index == homeIndex || index == galleryIndex || index == mySongsIndex) {
       if (mounted) {
         setState(() {
           _activeNavIndex = index;
-          if (index == 0) {
+          if (index == homeIndex) {
             _isGallerySearchOpen = false;
             _isFavoritesSearchOpen = false;
             _gallerySearchController.clear();
@@ -143,17 +293,20 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
           }
         });
       }
-      if (index == 0) {
+      if (index == homeIndex) {
         _gallerySearchFocusNode.unfocus();
         _favoritesSearchFocusNode.unfocus();
       }
-      if (index == 1) {
+      if (index == galleryIndex) {
         await _loadSavedSnapshots();
+      }
+      if (index == mySongsIndex) {
+        await widget.controller.loadCatchemLibrary();
       }
       return;
     }
 
-    if (index == 3) {
+    if (index == moreIndex) {
       _showMoreActionsSubmenu();
       return;
     }
@@ -958,11 +1111,270 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     );
   }
 
+  String _pendingCatchemDeleteKey(CatchemSongEntry entry) {
+    return '${entry.key}|${entry.lastDetectedAtMs}';
+  }
+
+  void _undoPendingCatchemDelete(String pendingKey) {
+    final timer = _pendingCatchemDeleteTimers.remove(pendingKey);
+    timer?.cancel();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _pendingCatchemDeleteEntries.remove(pendingKey);
+    });
+  }
+
+  void _scheduleCatchemDeleteWithUndo(CatchemSongEntry entry, AppLocalizations l10n) {
+    final pendingKey = _pendingCatchemDeleteKey(entry);
+
+    final existingTimer = _pendingCatchemDeleteTimers.remove(pendingKey);
+    existingTimer?.cancel();
+
+    setState(() {
+      _pendingCatchemDeleteEntries[pendingKey] = entry;
+    });
+
+    final timer = Timer(const Duration(seconds: 5), () async {
+      _pendingCatchemDeleteTimers.remove(pendingKey);
+      final pendingEntry = _pendingCatchemDeleteEntries[pendingKey];
+      if (pendingEntry == null) {
+        return;
+      }
+
+      final removed = await widget.controller.removeCatchemEntry(pendingEntry);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _pendingCatchemDeleteEntries.remove(pendingKey);
+      });
+
+      if (!removed) {
+        return;
+      }
+
+      AppTopFeedback.show(
+        context,
+        l10n.catchemDeleted,
+        duration: const Duration(milliseconds: 1300),
+      );
+    });
+
+    _pendingCatchemDeleteTimers[pendingKey] = timer;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 5),
+        content: Text(l10n.catchemDeleted),
+        action: SnackBarAction(
+          label: 'Volver a agregar canción',
+          onPressed: () => _undoPendingCatchemDelete(pendingKey),
+        ),
+      ),
+    );
+  }
+
+  String _mapPlayCountLabel(BuildContext context, int count) {
+    final localeCode = Localizations.localeOf(context).languageCode.toLowerCase();
+    if (localeCode == 'es') {
+      return count == 1 ? '$count reproducción' : '$count reproducciones';
+    }
+    return count == 1 ? '$count play' : '$count plays';
+  }
+
   Widget _buildMySongsPage({
     required ThemeData theme,
     required AppLocalizations l10n,
   }) {
     final favoritesSearchQuery = _normalizeSearchText(_favoritesSearchController.text);
+    final languageCode = Localizations.localeOf(context).languageCode.toLowerCase();
+    final albumChipLabel = languageCode == 'es' ? 'Álbum' : 'Album';
+    final unknownAlbumLabel = languageCode == 'es' ? 'Álbum desconocido' : 'Unknown album';
+
+    String monthKey(DateTime date) => '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}';
+    DateTime dayStart(DateTime date) => DateTime(date.year, date.month, date.day);
+    String monthLabel(DateTime date) {
+      final localeTag = Localizations.localeOf(context).toLanguageTag();
+      return DateFormat('MMMM', localeTag).format(DateTime(date.year, date.month));
+    }
+    String monthYearLabel(DateTime date) {
+      final localeTag = Localizations.localeOf(context).toLanguageTag();
+      return DateFormat('MMMM yyyy', localeTag).format(DateTime(date.year, date.month));
+    }
+    Widget buildSongRow(
+      CatchemSongEntry currentItem, {
+      bool showArtistInTitle = true,
+    }) {
+      final isFavorite = widget.controller.isSongFavorite(
+        title: currentItem.title,
+        artist: currentItem.artist,
+      );
+      final listens = currentItem.detectCount <= 0 ? 1 : currentItem.detectCount;
+      final obsessionEmoji = _catchemObsessionEmoji(
+        l10n,
+        listens,
+        currentItem.lastDetectedAtMs,
+      );
+      final timestampLabel = _catchemTimeLabel(currentItem.lastDetectedAtMs);
+      final titleText = '$obsessionEmoji ${currentItem.title}';
+      final artistText = currentItem.artist.trim();
+      final subtitleText = showArtistInTitle && artistText.isNotEmpty
+          ? '$artistText • $timestampLabel'
+          : timestampLabel;
+      final playsLabel = _mapPlayCountLabel(context, listens);
+      return Dismissible(
+        key: ValueKey('catchem_${currentItem.key}_${currentItem.lastDetectedAtMs}'),
+        direction: DismissDirection.horizontal,
+        background: Container(
+          color: theme.colorScheme.errorContainer,
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Icon(
+            Icons.delete_outline_rounded,
+            color: theme.colorScheme.onErrorContainer,
+          ),
+        ),
+        secondaryBackground: Container(
+          color: theme.colorScheme.errorContainer,
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Icon(
+            Icons.delete_outline_rounded,
+            color: theme.colorScheme.onErrorContainer,
+          ),
+        ),
+        onDismissed: (_) {
+          _scheduleCatchemDeleteWithUndo(currentItem, l10n);
+        },
+        child: Row(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 12, top: 6, bottom: 6),
+              child: GestureDetector(
+                onTap: () => _showSongPlaybackLocationsMap(currentItem),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _buildArtworkImageProvider(currentItem.artworkUrl) == null
+                      ? const SizedBox(
+                          width: 64,
+                          height: 64,
+                          child: ColoredBox(color: Colors.black12),
+                        )
+                      : Image(
+                          image: _buildArtworkImageProvider(currentItem.artworkUrl)!,
+                          width: 64,
+                          height: 64,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const SizedBox(
+                            width: 64,
+                            height: 64,
+                            child: ColoredBox(color: Colors.black12),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: () async {
+                  await widget.controller.showCatchemInNowPlaying(currentItem);
+                  if (!mounted) {
+                    return;
+                  }
+                  setState(() {
+                    _activeNavIndex = 0;
+                  });
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        titleText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (showArtistInTitle && artistText.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                      ],
+                      Text(
+                        subtitleText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        playsLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 2),
+              child: IconButton(
+                tooltip: isFavorite ? l10n.removeFromFavorites : l10n.addToFavorites,
+                onPressed: () async {
+                  final toggledToFavorite = await widget.controller.toggleCatchemFavorite(currentItem);
+                  if (!mounted || toggledToFavorite == null) {
+                    return;
+                  }
+                  AppTopFeedback.show(
+                    context,
+                    toggledToFavorite ? l10n.favoriteAdded : l10n.favoriteRemoved,
+                  );
+                },
+                icon: Icon(
+                  isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: IconButton(
+                tooltip: l10n.openActivePlayer,
+                onPressed: () => unawaited(_openCatchemPlayer(currentItem)),
+                icon: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      _buildMediaSourceIcon(currentItem.sourcePackage, size: 20),
+                      Align(
+                        alignment: Alignment.bottomRight,
+                        child: Icon(
+                          Icons.play_arrow_rounded,
+                          size: 12,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -1020,12 +1432,99 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             ),
           ],
           const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AnimatedBuilder(
+              animation: widget.controller,
+              builder: (context, _) {
+                final hasNowPlayingEntries = widget.controller.catchemLibrary.any(
+                  (entry) => entry.sourceType.trim().toLowerCase() == 'pixel_now_playing',
+                );
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilterChip(
+                      label: Text(l10n.artistLabel),
+                      selected: _groupCatchemByArtist,
+                      onSelected: (selected) {
+                        if (!mounted) {
+                          return;
+                        }
+                        setState(() {
+                          _groupCatchemByArtist = selected;
+                          if (selected) {
+                            _groupCatchemByAlbum = false;
+                            _groupCatchemByNowPlaying = false;
+                            _showOnlyCatchemFavorites = false;
+                          }
+                        });
+                      },
+                    ),
+                    FilterChip(
+                      label: Text(albumChipLabel),
+                      selected: _groupCatchemByAlbum,
+                      onSelected: (selected) {
+                        if (!mounted) {
+                          return;
+                        }
+                        setState(() {
+                          _groupCatchemByAlbum = selected;
+                          if (selected) {
+                            _groupCatchemByArtist = false;
+                            _groupCatchemByNowPlaying = false;
+                            _showOnlyCatchemFavorites = false;
+                          }
+                        });
+                      },
+                    ),
+                    FilterChip(
+                      label: Text(l10n.favoritesLabel),
+                      selected: _showOnlyCatchemFavorites,
+                      onSelected: (selected) {
+                        if (!mounted) {
+                          return;
+                        }
+                        setState(() {
+                          _showOnlyCatchemFavorites = selected;
+                          if (selected) {
+                            _groupCatchemByArtist = false;
+                            _groupCatchemByAlbum = false;
+                            _groupCatchemByNowPlaying = false;
+                          }
+                        });
+                      },
+                    ),
+                    if (hasNowPlayingEntries)
+                      FilterChip(
+                        label: Text(l10n.nowPlayingDefaultTitle),
+                        selected: _groupCatchemByNowPlaying,
+                        onSelected: (selected) {
+                          if (!mounted) {
+                            return;
+                          }
+                          setState(() {
+                            _groupCatchemByNowPlaying = selected;
+                            if (selected) {
+                              _groupCatchemByArtist = false;
+                              _groupCatchemByAlbum = false;
+                              _showOnlyCatchemFavorites = false;
+                            }
+                          });
+                        },
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
           Expanded(
             child: AnimatedBuilder(
               animation: widget.controller,
               builder: (context, _) {
                 final entries = widget.controller.catchemLibrary;
-                final filteredEntries = entries.where((item) {
+                var filteredEntries = entries.where((item) {
                   if (favoritesSearchQuery.isEmpty) {
                     return true;
                   }
@@ -1040,6 +1539,35 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                   return terms.every(searchable.contains);
                 }).toList(growable: false);
 
+                final hasNowPlayingEntries = entries.any(
+                  (item) => item.sourceType.trim().toLowerCase() == 'pixel_now_playing',
+                );
+
+                if (_groupCatchemByNowPlaying && hasNowPlayingEntries) {
+                  filteredEntries = filteredEntries
+                      .where((item) => item.sourceType.trim().toLowerCase() == 'pixel_now_playing')
+                      .toList(growable: false);
+                }
+
+                if (_showOnlyCatchemFavorites) {
+                  filteredEntries = filteredEntries
+                      .where(
+                        (item) => widget.controller.isSongFavorite(
+                          title: item.title,
+                          artist: item.artist,
+                        ),
+                      )
+                      .toList(growable: false);
+                }
+
+                filteredEntries = filteredEntries
+                    .where(
+                      (item) => !_pendingCatchemDeleteEntries.containsKey(
+                        _pendingCatchemDeleteKey(item),
+                      ),
+                    )
+                    .toList(growable: false);
+
                 if (filteredEntries.isEmpty) {
                   return Center(
                     child: Text(
@@ -1050,120 +1578,315 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                   );
                 }
 
-                return ListView.separated(
-                  itemCount: filteredEntries.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final item = filteredEntries[index];
-                    final detectCountLabel = l10n.catchemDetectionCount(item.detectCount);
-                    final captureModeLabel = _localizedCaptureModeLabel(l10n, item.captureMode);
-                    final timestampLabel = _catchemTimestampLabel(l10n, item.lastDetectedAtMs);
-                    final subtitleParts = <String>[
-                      item.artist,
-                      detectCountLabel,
-                      l10n.catchemCaptureMode(captureModeLabel),
-                      timestampLabel,
-                    ];
-                    return Dismissible(
-                      key: ValueKey('catchem_${item.key}_${item.lastDetectedAtMs}'),
-                      direction: DismissDirection.horizontal,
-                      background: Container(
-                        color: theme.colorScheme.errorContainer,
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Icon(
-                          Icons.delete_outline_rounded,
-                          color: theme.colorScheme.onErrorContainer,
+                final now = DateTime.now();
+                final todayStart = dayStart(now);
+                final yesterdayStart = todayStart.subtract(const Duration(days: 1));
+                final monthStart = DateTime(now.year, now.month, 1);
+
+                if (favoritesSearchQuery.isEmpty &&
+                    !_groupCatchemByArtist &&
+                    !_groupCatchemByAlbum &&
+                    !_groupCatchemByNowPlaying &&
+                  !_showOnlyCatchemFavorites &&
+                    widget.controller.hasMoreCatchem &&
+                    !widget.controller.isLoadingMoreCatchem &&
+                    entries.isNotEmpty) {
+                  final lastLoaded = entries.last;
+                  final lastLoadedAt = DateTime.fromMillisecondsSinceEpoch(
+                    lastLoaded.lastDetectedAtMs <= 0 ? 0 : lastLoaded.lastDetectedAtMs,
+                  );
+                  final lastLoadedDay = dayStart(lastLoadedAt);
+                  if (lastLoadedDay == todayStart) {
+                    final nowMs = DateTime.now().millisecondsSinceEpoch;
+                    if (nowMs - _lastTodayAutoLoadAtMs > 650) {
+                      _lastTodayAutoLoadAtMs = nowMs;
+                      unawaited(widget.controller.loadMoreCatchemPage());
+                    }
+                  }
+                }
+
+                final today = <CatchemSongEntry>[];
+                final yesterday = <CatchemSongEntry>[];
+                final thisMonth = <CatchemSongEntry>[];
+                final previousMonthsCurrentYear = <String, List<CatchemSongEntry>>{};
+                final previousYears = <int, Map<String, List<CatchemSongEntry>>>{};
+
+                for (final item in filteredEntries) {
+                  final detectedAt = DateTime.fromMillisecondsSinceEpoch(
+                    item.lastDetectedAtMs <= 0 ? 0 : item.lastDetectedAtMs,
+                  );
+                  final detectedDay = dayStart(detectedAt);
+
+                  if (detectedDay == todayStart) {
+                    today.add(item);
+                    continue;
+                  }
+                  if (detectedDay == yesterdayStart) {
+                    yesterday.add(item);
+                    continue;
+                  }
+                  if (detectedAt.year == now.year &&
+                      detectedAt.month == now.month &&
+                      detectedDay.isBefore(yesterdayStart)) {
+                    thisMonth.add(item);
+                    continue;
+                  }
+
+                  if (detectedAt.year == now.year && detectedAt.isBefore(monthStart)) {
+                    final key = monthKey(detectedAt);
+                    previousMonthsCurrentYear.putIfAbsent(key, () => <CatchemSongEntry>[]).add(item);
+                    continue;
+                  }
+
+                  final yearMap = previousYears.putIfAbsent(detectedAt.year, () => <String, List<CatchemSongEntry>>{});
+                  final key = monthKey(detectedAt);
+                  yearMap.putIfAbsent(key, () => <CatchemSongEntry>[]).add(item);
+                }
+
+                final content = <Widget>[];
+
+                int compareByMostPlayed(CatchemSongEntry a, CatchemSongEntry b) {
+                  final playsA = a.detectCount <= 0 ? 1 : a.detectCount;
+                  final playsB = b.detectCount <= 0 ? 1 : b.detectCount;
+                  final byPlays = playsB.compareTo(playsA);
+                  if (byPlays != 0) {
+                    return byPlays;
+                  }
+                  return b.lastDetectedAtMs.compareTo(a.lastDetectedAtMs);
+                }
+
+                void addSectionHeader(String text) {
+                  content.add(
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+                      child: Text(
+                        text,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.primary,
                         ),
                       ),
-                      secondaryBackground: Container(
-                        color: theme.colorScheme.errorContainer,
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Icon(
-                          Icons.delete_outline_rounded,
-                          color: theme.colorScheme.onErrorContainer,
-                        ),
-                      ),
-                      onDismissed: (_) async {
-                        final removed = await widget.controller.removeCatchemEntry(item);
-                        if (!removed || !mounted) {
-                          return;
-                        }
-                        AppTopFeedback.show(
-                          this.context,
-                          AppLocalizations.of(this.context).catchemDeleted,
-                          duration: const Duration(milliseconds: 1300),
-                        );
-                      },
-                      child: Row(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(left: 16, right: 12, top: 10, bottom: 10),
-                            child: GestureDetector(
-                              onTap: () async {
-                                await widget.controller.showCatchemInNowPlaying(item);
-                                if (!mounted) {
-                                  return;
-                                }
-                                setState(() {
-                                  _activeNavIndex = 0;
-                                });
-                              },
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: _buildArtworkImageProvider(item.artworkUrl) == null
-                                    ? const SizedBox(
-                                        width: 42,
-                                        height: 42,
-                                        child: ColoredBox(color: Colors.black12),
-                                      )
-                                    : Image(
-                                        image: _buildArtworkImageProvider(item.artworkUrl)!,
-                                        width: 42,
-                                        height: 42,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => const SizedBox(
-                                          width: 42,
-                                          height: 42,
-                                          child: ColoredBox(color: Colors.black12),
-                                        ),
-                                      ),
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: InkWell(
-                              onTap: () => _showCatchemCaptureHistory(item),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 10),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      subtitleParts.join(' • '),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          const Padding(
-                            padding: EdgeInsets.only(left: 8, right: 12),
-                            child: Icon(Icons.chevron_right_rounded),
-                          ),
-                        ],
+                    ),
+                  );
+                }
+
+                void addVisibleRows({
+                  required String sectionKey,
+                  required List<CatchemSongEntry> rows,
+                  bool showArtistInTitle = true,
+                }) {
+                  if (rows.isEmpty) {
+                    return;
+                  }
+                  final visibleRows = rows;
+
+                  for (final row in visibleRows) {
+                    content.add(buildSongRow(row, showArtistInTitle: showArtistInTitle));
+                  }
+                }
+
+                if (_groupCatchemByArtist) {
+                  final groupedByArtist = <String, List<CatchemSongEntry>>{};
+                  for (final row in filteredEntries) {
+                    final artistKey = row.artist.trim().isEmpty ? l10n.unknownArtist : row.artist.trim();
+                    groupedByArtist.putIfAbsent(artistKey, () => <CatchemSongEntry>[]).add(row);
+                  }
+
+                  final artistKeys = groupedByArtist.keys.toList()
+                    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+                  for (final artistKey in artistKeys) {
+                    final artistRows = List<CatchemSongEntry>.from(
+                      groupedByArtist[artistKey] ?? const <CatchemSongEntry>[],
+                    )
+                      ..sort(compareByMostPlayed);
+                    if (artistRows.isEmpty) {
+                      continue;
+                    }
+                    addSectionHeader(artistKey);
+                    addVisibleRows(
+                      sectionKey: 'artist-$artistKey',
+                      rows: artistRows,
+                      showArtistInTitle: false,
+                    );
+                  }
+                } else if (_groupCatchemByAlbum) {
+                  final groupedByAlbum = <String, List<CatchemSongEntry>>{};
+                  for (final row in filteredEntries) {
+                    final albumKey = (row.albumName ?? '').trim().isEmpty
+                        ? unknownAlbumLabel
+                        : row.albumName!.trim();
+                    groupedByAlbum.putIfAbsent(albumKey, () => <CatchemSongEntry>[]).add(row);
+                  }
+
+                  final albumKeys = groupedByAlbum.keys.toList()
+                    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+                  for (final albumKey in albumKeys) {
+                    final albumRows = List<CatchemSongEntry>.from(
+                      groupedByAlbum[albumKey] ?? const <CatchemSongEntry>[],
+                    )
+                      ..sort(compareByMostPlayed);
+                    if (albumRows.isEmpty) {
+                      continue;
+                    }
+                    addSectionHeader(albumKey);
+                    addVisibleRows(
+                      sectionKey: 'album-$albumKey',
+                      rows: albumRows,
+                      showArtistInTitle: true,
+                    );
+                  }
+                } else if (_showOnlyCatchemFavorites) {
+                  final favoriteRows = List<CatchemSongEntry>.from(filteredEntries)
+                    ..sort(compareByMostPlayed);
+                  addVisibleRows(
+                    sectionKey: 'favorites-most-played',
+                    rows: favoriteRows,
+                    showArtistInTitle: true,
+                  );
+                } else {
+                  if (today.isNotEmpty) {
+                    addSectionHeader(l10n.todayLabel);
+                    addVisibleRows(sectionKey: 'today', rows: today);
+                  }
+
+                  if (yesterday.isNotEmpty) {
+                    addSectionHeader(l10n.yesterdayLabel);
+                    addVisibleRows(sectionKey: 'yesterday', rows: yesterday);
+                  }
+
+                  if (thisMonth.isNotEmpty) {
+                    addSectionHeader(l10n.thisMonthLabel);
+                    addVisibleRows(sectionKey: 'this-month', rows: thisMonth);
+                  }
+
+                  final previousMonthKeys = previousMonthsCurrentYear.keys.toList()
+                    ..sort((a, b) => b.compareTo(a));
+                  for (final key in previousMonthKeys) {
+                    final rows = previousMonthsCurrentYear[key] ?? const <CatchemSongEntry>[];
+                    if (rows.isEmpty) {
+                      continue;
+                    }
+                    final sampleDate = DateTime.parse('$key-01');
+                    final expanded = _expandedCatchemMonths.contains(key);
+                    content.add(
+                      ListTile(
+                        dense: true,
+                        title: Text(monthLabel(sampleDate)),
+                        subtitle: Text(l10n.catchemPlayedSongsCount(rows.length)),
+                        trailing: Icon(expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded),
+                        onTap: () {
+                          setState(() {
+                            if (expanded) {
+                              _expandedCatchemMonths.remove(key);
+                            } else {
+                              _expandedCatchemMonths.add(key);
+                            }
+                          });
+                        },
                       ),
                     );
-                  },
+                    if (expanded) {
+                      addVisibleRows(sectionKey: 'month-$key', rows: rows);
+                    }
+                  }
+
+                  final yearKeys = previousYears.keys.toList()..sort((a, b) => b.compareTo(a));
+                  for (final year in yearKeys) {
+                    final expandedYear = _expandedCatchemYears.contains(year);
+                    final months = previousYears[year] ?? const <String, List<CatchemSongEntry>>{};
+                    final totalYearSongs = months.values.fold<int>(0, (acc, value) => acc + value.length);
+                    content.add(
+                      ListTile(
+                        dense: true,
+                        title: Text('$year'),
+                        subtitle: Text(l10n.catchemPlayedSongsCount(totalYearSongs)),
+                        trailing: Icon(expandedYear ? Icons.expand_less_rounded : Icons.expand_more_rounded),
+                        onTap: () {
+                          setState(() {
+                            if (expandedYear) {
+                              _expandedCatchemYears.remove(year);
+                            } else {
+                              _expandedCatchemYears.add(year);
+                            }
+                          });
+                        },
+                      ),
+                    );
+
+                    if (!expandedYear) {
+                      continue;
+                    }
+
+                    final monthKeys = months.keys.toList()..sort((a, b) => b.compareTo(a));
+                    for (final key in monthKeys) {
+                      final rows = months[key] ?? const <CatchemSongEntry>[];
+                      if (rows.isEmpty) {
+                        continue;
+                      }
+                      final monthId = '$year-$key';
+                      final expandedMonth = _expandedCatchemYearMonths.contains(monthId);
+                      final sampleDate = DateTime.parse('$key-01');
+                      content.add(
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12),
+                          child: ListTile(
+                            dense: true,
+                            title: Text(monthYearLabel(sampleDate)),
+                            subtitle: Text(l10n.catchemPlayedSongsCount(rows.length)),
+                            trailing: Icon(expandedMonth ? Icons.expand_less_rounded : Icons.expand_more_rounded),
+                            onTap: () {
+                              setState(() {
+                                if (expandedMonth) {
+                                  _expandedCatchemYearMonths.remove(monthId);
+                                } else {
+                                  _expandedCatchemYearMonths.add(monthId);
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                      );
+                      if (expandedMonth) {
+                        addVisibleRows(sectionKey: 'year-month-$monthId', rows: rows);
+                      }
+                    }
+                  }
+                }
+
+                if (content.isEmpty) {
+                  return Center(
+                    child: Text(
+                      favoritesSearchQuery.isEmpty ? l10n.noCatchemYet : l10n.noResults,
+                      style: theme.textTheme.bodyLarge,
+                      textAlign: TextAlign.center,
+                    ),
+                  );
+                }
+
+                return ListView(
+                  controller: _catchemScrollController,
+                  children: content,
                 );
               },
             ),
+          ),
+          AnimatedBuilder(
+            animation: widget.controller,
+            builder: (context, _) {
+              if (!widget.controller.isLoadingMoreCatchem) {
+                return const SizedBox.shrink();
+              }
+              return const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -1174,6 +1897,19 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _catchemScrollController.addListener(() {
+      if (!_catchemScrollController.hasClients) {
+        return;
+      }
+      final position = _catchemScrollController.position;
+      if (position.pixels + 320 >= position.maxScrollExtent) {
+        unawaited(
+          widget.controller.loadMoreCatchemLibraryIfNeeded(
+            visibleIndex: widget.controller.catchemLibrary.length - 1,
+          ),
+        );
+      }
+    });
     widget.controller.addListener(_onControllerChanged);
     unawaited(_loadAppearancePreferences());
     _syncWakeLockWithPlayback(
@@ -1185,6 +1921,12 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    for (final timer in _pendingCatchemDeleteTimers.values) {
+      timer.cancel();
+    }
+    _pendingCatchemDeleteTimers.clear();
+    _pendingCatchemDeleteEntries.clear();
+    _catchemScrollController.dispose();
     _sleepTimerTicker?.cancel();
     _sleepTimerPulse.dispose();
     WakelockPlus.disable();
@@ -1256,6 +1998,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       final snapshotTitles = <String, String>{};
       final snapshotArtists = <String, String>{};
       final snapshotSourcePackages = <String, String>{};
+      final pendingScreenshotSync = <Future<void>>[];
       if (raw is List) {
         for (final entry in raw) {
           if (entry is Map) {
@@ -1278,6 +2021,16 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             snapshotTitles[uri] = (entry['title'] ?? '').toString().trim();
             snapshotArtists[uri] = (entry['artist'] ?? '').toString().trim();
             snapshotSourcePackages[uri] = (entry['sourcePackage'] ?? '').toString().trim();
+            pendingScreenshotSync.add(
+              widget.controller.registerSavedScreenshot(
+                uri: uri,
+                dateAddedMs: ms ?? 0,
+                displayName: snapshotDisplayNames[uri],
+                title: snapshotTitles[uri],
+                artist: snapshotArtists[uri],
+                sourcePackage: snapshotSourcePackages[uri],
+              ),
+            );
             continue;
           }
 
@@ -1287,6 +2040,10 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             snapshotDates[value] = DateTime.fromMillisecondsSinceEpoch(0);
           }
         }
+      }
+
+      if (pendingScreenshotSync.isNotEmpty) {
+        await Future.wait(pendingScreenshotSync);
       }
 
       uris.sort((a, b) {
@@ -1299,6 +2056,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         return;
       }
 
+      final hadSnapshotsBefore = _savedSnapshotUris.isNotEmpty;
       setState(() {
         _savedSnapshotUris = uris;
         _savedSnapshotDateByUri
@@ -1325,11 +2083,15 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         _snapshotBytesFutureByUri
           ..clear()
           ..addAll(updatedCache);
+        if (hadSnapshotsBefore && uris.isEmpty && _activeNavIndex == 1) {
+          _activeNavIndex = 0;
+        }
       });
     } catch (_) {
       if (!mounted) {
         return;
       }
+      final hadSnapshotsBefore = _savedSnapshotUris.isNotEmpty;
       setState(() {
         _savedSnapshotUris = const <String>[];
         _savedSnapshotDateByUri.clear();
@@ -1338,6 +2100,9 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         _savedSnapshotArtistByUri.clear();
         _savedSnapshotSourcePackageByUri.clear();
         _snapshotBytesFutureByUri.clear();
+        if (hadSnapshotsBefore && _activeNavIndex == 1) {
+          _activeNavIndex = 0;
+        }
       });
     } finally {
       if (mounted) {
@@ -2437,29 +3202,160 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
-  String _localizedCaptureModeLabel(AppLocalizations l10n, String modeCode) {
-    return modeCode.trim().toLowerCase() == 'manual'
-        ? l10n.catchemCaptureManual
-        : l10n.catchemCaptureAutomatic;
+  String _catchemTimeLabel(int epochMs) {
+    if (epochMs <= 0) {
+      return '--:--';
+    }
+    final dateTime = DateTime.fromMillisecondsSinceEpoch(epochMs);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(dateTime.year, dateTime.month, dateTime.day);
+    final diffDays = today.difference(target).inDays;
+    final localeTag = Localizations.localeOf(context).toLanguageTag();
+    if (diffDays > 1) {
+      return DateFormat('dd/MM/yyyy HH:mm', localeTag).format(dateTime);
+    }
+    return DateFormat('h:mm a', localeTag).format(dateTime).toLowerCase();
   }
 
-  String _catchemTimestampLabel(AppLocalizations l10n, int epochMs) {
-    if (epochMs <= 0) {
-      return l10n.catchemTimestampUnknown;
+  String _catchemObsessionEmoji(AppLocalizations l10n, int count, int lastDetectedAtMs) {
+    final normalized = count <= 0 ? 1 : count;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final detectedAt = DateTime.fromMillisecondsSinceEpoch(lastDetectedAtMs <= 0 ? 0 : lastDetectedAtMs);
+    final detectedDay = DateTime(detectedAt.year, detectedAt.month, detectedAt.day);
+    if (normalized <= 1) {
+      return '🕵️';
     }
-
-    final localeTag = Localizations.localeOf(context).toLanguageTag();
-    final date = DateFormat('dd/MM/yyyy', localeTag)
-        .format(DateTime.fromMillisecondsSinceEpoch(epochMs));
-    final time = DateFormat('HH:mm', localeTag)
-        .format(DateTime.fromMillisecondsSinceEpoch(epochMs));
-    return l10n.catchemLastHeard(date, time);
+    if (normalized >= 10 && detectedDay == today) {
+      return '🔥';
+    }
+    if (normalized > 5) {
+      return '🔄';
+    }
+    return '🛰️';
   }
 
   Future<void> _showCatchemCaptureHistory(CatchemSongEntry item) async {
     final l10n = AppLocalizations.of(context);
-    final sortedHistory = List<CatchemCaptureRecord>.from(item.captureHistory)
-      ..sort((a, b) => b.capturedAtMs.compareTo(a.capturedAtMs));
+    final playbackHistory = await widget.controller.loadPlaybackHistoryForSong(
+      title: item.title,
+      artist: item.artist,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    String playedAtLabel(int epochMs) {
+      if (epochMs <= 0) {
+        return l10n.catchemTimestampUnknown;
+      }
+      final localeTag = Localizations.localeOf(context).toLanguageTag();
+      return DateFormat('dd/MM/yyyy • h:mm a', localeTag)
+          .format(DateTime.fromMillisecondsSinceEpoch(epochMs))
+          .toLowerCase();
+    }
+
+    Future<void> openPlaybackOnMap(CatchemPlaybackRecord record) async {
+      final lat = record.latitude;
+      final lng = record.longitude;
+      if (lat == null || lng == null) {
+        AppTopFeedback.show(context, l10n.catchemMapNoPoints);
+        return;
+      }
+
+      final center = LatLng(lat, lng);
+      final infoLine = '${item.title} - ${item.artist} • ${playedAtLabel(record.playedAtMs)}';
+      final artwork = _buildArtworkImageProvider(item.artworkUrl);
+
+      await showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        isScrollControlled: true,
+        builder: (mapContext) {
+          final theme = Theme.of(mapContext);
+          final isDarkMap = theme.brightness == Brightness.dark;
+          final tileUrlTemplate = isDarkMap
+              ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+              : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+          final mapController = MapController();
+
+          return SizedBox(
+            height: MediaQuery.of(mapContext).size.height * 0.68,
+            child: Column(
+              children: [
+                ListTile(
+                  title: Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    infoLine,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    tooltip: l10n.close,
+                    onPressed: () => Navigator.of(mapContext).pop(),
+                  ),
+                ),
+                Expanded(
+                  child: FlutterMap(
+                    mapController: mapController,
+                    options: MapOptions(
+                      initialCenter: center,
+                      initialZoom: 17,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: tileUrlTemplate,
+                        subdomains: const <String>['a', 'b', 'c', 'd'],
+                        userAgentPackageName: 'net.iozamudioa.singsync',
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: center,
+                            width: 84,
+                            height: 84,
+                            child: Container(
+                              width: 68,
+                              height: 68,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: theme.colorScheme.surface,
+                                  width: 2,
+                                ),
+                                image: artwork != null
+                                    ? DecorationImage(image: artwork, fit: BoxFit.cover)
+                                    : null,
+                                color: artwork == null
+                                    ? theme.colorScheme.primaryContainer
+                                    : null,
+                              ),
+                              child: artwork == null
+                                  ? Icon(
+                                      Icons.music_note_rounded,
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -2473,9 +3369,10 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             children: [
               ListTile(
                 title: Text(
-                  l10n.catchemCaptureHistoryTitle(item.title),
+                  '${item.title} - ${item.artist}',
                   style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
+                subtitle: Text(_catchemObsessionEmoji(l10n, playbackHistory.length, item.lastDetectedAtMs)),
                 trailing: IconButton(
                   icon: const Icon(Icons.close_rounded),
                   tooltip: l10n.close,
@@ -2483,21 +3380,659 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                 ),
               ),
               Expanded(
-                child: ListView.separated(
-                  itemCount: sortedHistory.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final capture = sortedHistory[index];
-                    final mode = _localizedCaptureModeLabel(l10n, capture.captureMode);
-                    final timestamp = _catchemTimestampLabel(l10n, capture.capturedAtMs);
-                    return ListTile(
-                      leading: Icon(
-                        capture.captureMode.trim().toLowerCase() == 'manual'
-                            ? Icons.favorite_rounded
-                            : Icons.auto_awesome_rounded,
+                child: playbackHistory.isEmpty
+                    ? Center(
+                        child: Text(
+                          l10n.catchemNoPlaybackHistoryYet,
+                          style: theme.textTheme.bodyMedium,
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: playbackHistory.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final record = playbackHistory[index];
+                          final timestamp = playedAtLabel(record.playedAtMs);
+                          return ListTile(
+                            leading: _buildMediaSourceIcon(record.sourcePackage),
+                            title: Text(timestamp),
+                            onTap: () => unawaited(openPlaybackOnMap(record)),
+                          );
+                        },
                       ),
-                      title: Text(l10n.catchemCaptureMode(mode)),
-                      subtitle: Text(timestamp),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showSongPlaybackLocationsMap(CatchemSongEntry item) async {
+    final l10n = AppLocalizations.of(context);
+    final playbackHistory = await widget.controller.loadPlaybackHistoryForSong(
+      title: item.title,
+      artist: item.artist,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    final geolocatedRecords = playbackHistory
+      .where((record) => record.latitude != null && record.longitude != null)
+      .toList(growable: false);
+
+    final rawPoints = geolocatedRecords
+      .map((record) => LatLng(record.latitude!, record.longitude!))
+      .toList(growable: false);
+
+    if (rawPoints.isEmpty) {
+      AppTopFeedback.show(context, l10n.catchemMapNoPoints);
+      return;
+    }
+
+    double minLat = rawPoints.first.latitude;
+    double maxLat = rawPoints.first.latitude;
+    double minLng = rawPoints.first.longitude;
+    double maxLng = rawPoints.first.longitude;
+    for (final point in rawPoints) {
+      if (point.latitude < minLat) {
+        minLat = point.latitude;
+      }
+      if (point.latitude > maxLat) {
+        maxLat = point.latitude;
+      }
+      if (point.longitude < minLng) {
+        minLng = point.longitude;
+      }
+      if (point.longitude > maxLng) {
+        maxLng = point.longitude;
+      }
+    }
+
+    final latSpan = (maxLat - minLat).abs();
+    final lngSpan = (maxLng - minLng).abs();
+    final maxSpan = math.max(latSpan, lngSpan);
+    final center = LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2);
+
+    double zoomForSpan(double span) {
+      if (span > 20) return 3.2;
+      if (span > 8) return 4.6;
+      if (span > 3) return 6.0;
+      if (span > 1) return 7.4;
+      if (span > 0.3) return 9.0;
+      if (span > 0.08) return 10.8;
+      if (span > 0.02) return 12.8;
+      if (span > 0.005) return 14.4;
+      return 16.0;
+    }
+
+    final initialZoom = zoomForSpan(maxSpan);
+    final artwork = _buildArtworkImageProvider(item.artworkUrl);
+
+    final pointsPerBucket = <String, int>{};
+    final songMarkers = <_SongPlaybackMapMarker>[];
+    for (final record in geolocatedRecords) {
+      final lat = record.latitude!;
+      final lng = record.longitude!;
+      final bucket = '${lat.toStringAsFixed(5)}|${lng.toStringAsFixed(5)}';
+      final localIndex = pointsPerBucket[bucket] ?? 0;
+      pointsPerBucket[bucket] = localIndex + 1;
+
+      final scattered = _buildScatteredPoint(
+        lat: lat,
+        lng: lng,
+        seedKey: '${item.title}|${item.artist}|${record.playedAtMs}|$localIndex',
+        localIndex: localIndex,
+        zoom: initialZoom,
+      );
+
+      songMarkers.add(
+        _SongPlaybackMapMarker(
+          markerId: '$bucket|$localIndex|${record.playedAtMs}',
+          point: scattered.point,
+          rotation: scattered.rotation,
+          playedAtMs: record.playedAtMs,
+        ),
+      );
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (mapContext) {
+        final theme = Theme.of(mapContext);
+        final isDarkMap = theme.brightness == Brightness.dark;
+        final tileUrlTemplate = isDarkMap
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        final localeTag = Localizations.localeOf(mapContext).toLanguageTag();
+        String? selectedMarkerId;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            String playbackLabel(int epochMs) {
+              if (epochMs <= 0) {
+                return l10n.catchemTimestampUnknown;
+              }
+              return DateFormat('dd/MM/yyyy • h:mm a', localeTag)
+                  .format(DateTime.fromMillisecondsSinceEpoch(epochMs))
+                  .toLowerCase();
+            }
+
+            return SizedBox(
+              height: MediaQuery.of(mapContext).size.height * 0.72,
+              child: Column(
+                children: [
+                  ListTile(
+                    title: Text(
+                      '${item.title} - ${item.artist}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(_mapPlayCountLabel(mapContext, playbackHistory.length)),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: l10n.close,
+                      onPressed: () => Navigator.of(mapContext).pop(),
+                    ),
+                  ),
+                  Expanded(
+                    child: FlutterMap(
+                      options: MapOptions(
+                        initialCenter: center,
+                        initialZoom: initialZoom,
+                      ),
+                      children: [
+                        TileLayer(
+                          urlTemplate: tileUrlTemplate,
+                          subdomains: const <String>['a', 'b', 'c', 'd'],
+                          userAgentPackageName: 'net.iozamudioa.singsync',
+                        ),
+                        MarkerLayer(
+                          markers: songMarkers
+                              .map(
+                                (marker) => Marker(
+                                  point: marker.point,
+                                  width: 82,
+                                  height: 82,
+                                  child: Transform.rotate(
+                                    angle: marker.rotation,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        setModalState(() {
+                                          selectedMarkerId = marker.markerId;
+                                        });
+                                      },
+                                      child: _buildUnifiedMapArtworkMarker(
+                                        theme: theme,
+                                        artwork: artwork,
+                                        showTooltip: selectedMarkerId == marker.markerId,
+                                        tooltipText: playbackLabel(marker.playedAtMs),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildUnifiedMapArtworkMarker({
+    required ThemeData theme,
+    required ImageProvider<Object>? artwork,
+    bool showTooltip = false,
+    String? tooltipText,
+  }) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 66,
+          height: 66,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: theme.colorScheme.surface,
+              width: 2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+            image: artwork != null
+                ? DecorationImage(image: artwork, fit: BoxFit.cover)
+                : null,
+            color: artwork == null
+                ? theme.colorScheme.primaryContainer
+                : null,
+          ),
+          child: artwork == null
+              ? Icon(
+                  Icons.music_note_rounded,
+                  color: theme.colorScheme.onPrimaryContainer,
+                )
+              : null,
+        ),
+        if (showTooltip && (tooltipText ?? '').trim().isNotEmpty)
+          Positioned(
+            top: -52,
+            left: -52,
+            child: SizedBox(
+              width: 170,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface.withValues(alpha: 0.95),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: theme.colorScheme.outlineVariant,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Text(
+                    '🕒 ${tooltipText!.trim()}',
+                    maxLines: 2,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelSmall,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  _ScatteredMapPoint _buildScatteredPoint({
+    required double lat,
+    required double lng,
+    required String seedKey,
+    required int localIndex,
+    required double zoom,
+  }) {
+    final hash = seedKey.hashCode;
+    final jitter = ((hash & 0xFF) / 255.0) - 0.5;
+    final ring = (localIndex ~/ 10) + 1;
+    final angle = ((localIndex * 137.5) + (hash % 37)) * (math.pi / 180);
+    final baseAmplitude = (0.020 / math.pow(2, zoom.clamp(8.0, 20.0) - 8)).clamp(0.00006, 0.0020);
+    final radius = baseAmplitude * ring;
+    final deltaLat = math.sin(angle) * radius;
+    final deltaLng = math.cos(angle) * radius;
+    final rotation = (((hash ~/ 541) & 0x7fffffff) / 0x7fffffff - 0.5) * 0.52 + (jitter * 0.06);
+
+    return _ScatteredMapPoint(
+      point: LatLng(lat + deltaLat, lng + deltaLng),
+      rotation: rotation,
+    );
+  }
+
+  Future<LatLng?> _tryGetCurrentMapLocation() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        return null;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        return null;
+      }
+
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        return LatLng(lastKnown.latitude, lastKnown.longitude);
+      }
+
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            timeLimit: Duration(seconds: 3),
+          ),
+        );
+        return LatLng(position.latitude, position.longitude);
+      } catch (_) {
+        if (lastKnown != null) {
+          return LatLng(lastKnown.latitude, lastKnown.longitude);
+        }
+        return null;
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _mapCoordinateBucketKey(double lat, double lng) {
+    return '${lat.toStringAsFixed(4)}|${lng.toStringAsFixed(4)}';
+  }
+
+  String _mapAlbumGroupKeyFromPoint(CatchemMapPointRecord point) {
+    final normalizedArtist = point.artist.trim().toLowerCase();
+    final normalizedAlbum = (point.albumName ?? '').trim().toLowerCase();
+    if (normalizedAlbum.isNotEmpty) {
+      return 'album::$normalizedArtist::$normalizedAlbum';
+    }
+    return 'artist::$normalizedArtist';
+  }
+
+  List<_MapLocationGroup> _groupMapPointsByLocation({
+    required List<CatchemMapPointRecord> points,
+    required Map<String, int> visibleLimitByLocation,
+  }) {
+    final grouped = <String, List<CatchemMapPointRecord>>{};
+    for (final point in points) {
+      final locationKey = _mapCoordinateBucketKey(point.latitude, point.longitude);
+      grouped.putIfAbsent(locationKey, () => <CatchemMapPointRecord>[]).add(point);
+    }
+
+    final groups = <_MapLocationGroup>[];
+    for (final entry in grouped.entries) {
+      final allLocationPoints = List<CatchemMapPointRecord>.from(entry.value)
+        ..sort((a, b) => b.detectedAtMs.compareTo(a.detectedAtMs));
+
+      final dedupedAlbumMarkers = <CatchemMapPointRecord>[];
+      final seenAlbumKeys = <String>{};
+      for (final point in allLocationPoints) {
+        final albumKey = _mapAlbumGroupKeyFromPoint(point);
+        if (seenAlbumKeys.add(albumKey)) {
+          dedupedAlbumMarkers.add(point);
+        }
+      }
+
+      if (dedupedAlbumMarkers.isEmpty) {
+        continue;
+      }
+
+      final visibleLimit = (visibleLimitByLocation[entry.key] ?? 1).clamp(1, 5000);
+      final visibleMarkers = dedupedAlbumMarkers.take(visibleLimit).toList(growable: false);
+
+      groups.add(
+        _MapLocationGroup(
+          key: entry.key,
+          latitude: allLocationPoints.first.latitude,
+          longitude: allLocationPoints.first.longitude,
+          allLocationPoints: allLocationPoints,
+          allAlbumMarkers: dedupedAlbumMarkers,
+          visibleAlbumMarkers: visibleMarkers,
+        ),
+      );
+    }
+
+    return groups;
+  }
+
+  List<_MapLocationGroup> _visibleLocationGroupsForMap({
+    required List<_MapLocationGroup> groups,
+    required LatLng center,
+    required double zoom,
+  }) {
+    if (groups.isEmpty) {
+      return const <_MapLocationGroup>[];
+    }
+
+    final latRadius = (0.16 / math.pow(2, zoom.clamp(9.0, 20.0) - 9)).clamp(0.0045, 0.22);
+    final lngRadius = latRadius * 1.28;
+
+    final visible = groups.where((group) {
+      return (group.latitude - center.latitude).abs() <= latRadius &&
+          (group.longitude - center.longitude).abs() <= lngRadius;
+    }).toList(growable: false);
+
+    if (visible.isNotEmpty) {
+      return visible;
+    }
+
+    final fallback = List<_MapLocationGroup>.from(groups)
+      ..sort((a, b) {
+        final da = math.pow(a.latitude - center.latitude, 2) +
+            math.pow(a.longitude - center.longitude, 2);
+        final db = math.pow(b.latitude - center.latitude, 2) +
+            math.pow(b.longitude - center.longitude, 2);
+        return da.compareTo(db);
+      });
+    return fallback.take(14).toList(growable: false);
+  }
+
+  Future<void> _showMapAlbumAtLocationDetail({
+    required BuildContext sheetContext,
+    required AppLocalizations l10n,
+    required _MapLocationGroup group,
+    required CatchemMapPointRecord selectedAlbumMarker,
+  }) async {
+    final selectedAlbumKey = _mapAlbumGroupKeyFromPoint(selectedAlbumMarker);
+    final albumPlays = group.allLocationPoints
+        .where((point) => _mapAlbumGroupKeyFromPoint(point) == selectedAlbumKey)
+        .toList(growable: false)
+      ..sort((a, b) => b.detectedAtMs.compareTo(a.detectedAtMs));
+
+    if (albumPlays.isEmpty) {
+      return;
+    }
+
+    final representative = albumPlays.first;
+    final totalPlayCount = albumPlays.length;
+    final playCountBySong = <String, int>{};
+    final latestPlayBySong = <String, CatchemMapPointRecord>{};
+    for (final play in albumPlays) {
+      final songKey = '${play.title.trim().toLowerCase()}|${play.artist.trim().toLowerCase()}';
+      playCountBySong[songKey] = (playCountBySong[songKey] ?? 0) + 1;
+      latestPlayBySong.putIfAbsent(songKey, () => play);
+    }
+    final groupedSongs = latestPlayBySong.values.toList(growable: false)
+      ..sort((a, b) => b.detectedAtMs.compareTo(a.detectedAtMs));
+
+    final headerArtwork = _buildArtworkImageProvider(representative.artworkUrl);
+    final headerTitle = (representative.albumName ?? '').trim().isNotEmpty
+        ? representative.albumName!.trim()
+        : representative.artist;
+
+    await showModalBottomSheet<void>(
+      context: sheetContext,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (detailContext) {
+        final detailTheme = Theme.of(detailContext);
+        return SizedBox(
+          height: MediaQuery.of(detailContext).size.height * 0.72,
+          child: Column(
+            children: [
+              ListTile(
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: headerArtwork != null
+                      ? Image(
+                          image: headerArtwork,
+                          width: 44,
+                          height: 44,
+                          fit: BoxFit.cover,
+                        )
+                      : Container(
+                          width: 44,
+                          height: 44,
+                          color: detailTheme.colorScheme.surfaceContainerHighest,
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.music_note_rounded),
+                        ),
+                ),
+                title: Text(
+                  headerTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(_mapPlayCountLabel(detailContext, totalPlayCount)),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: l10n.close,
+                  onPressed: () => Navigator.of(detailContext).pop(),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: groupedSongs.length,
+                  itemBuilder: (context, index) {
+                    final song = groupedSongs[index];
+                    final songKey = '${song.title.trim().toLowerCase()}|${song.artist.trim().toLowerCase()}';
+                    final songPlayCount = playCountBySong[songKey] ?? 1;
+                    final obsessionEmoji = songPlayCount >= 10
+                        ? '🔥'
+                        : (songPlayCount > 5
+                            ? '🔄'
+                            : (songPlayCount >= 2 ? '🛰️' : '🕵️'));
+                    final mapSongEntry = CatchemSongEntry(
+                      title: song.title,
+                      artist: song.artist,
+                      albumName: song.albumName,
+                      lyrics: '',
+                      artworkUrl: song.artworkUrl,
+                      detectCount: songPlayCount,
+                      firstDetectedAtMs: song.detectedAtMs,
+                      lastDetectedAtMs: song.detectedAtMs,
+                      sourceType: song.sourceType,
+                      sourcePackage: song.sourcePackage,
+                      lyricsSource: '',
+                      captureMode: 'automatic',
+                      captureHistory: const <CatchemCaptureRecord>[],
+                      latitude: song.latitude,
+                      longitude: song.longitude,
+                    );
+                    final isFavorite = widget.controller.isSongFavorite(
+                      title: song.title,
+                      artist: song.artist,
+                    );
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8, right: 12, top: 10, bottom: 10),
+                            child: GestureDetector(
+                              onTap: () => _showCatchemCaptureHistory(mapSongEntry),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: _buildArtworkImageProvider(song.artworkUrl) == null
+                                    ? const SizedBox(
+                                        width: 42,
+                                        height: 42,
+                                        child: ColoredBox(color: Colors.black12),
+                                      )
+                                    : Image(
+                                        image: _buildArtworkImageProvider(song.artworkUrl)!,
+                                        width: 42,
+                                        height: 42,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const SizedBox(
+                                          width: 42,
+                                          height: 42,
+                                          child: ColoredBox(color: Colors.black12),
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () async {
+                                await widget.controller.showCatchemInNowPlaying(mapSongEntry);
+                                if (!mounted) {
+                                  return;
+                                }
+                                Navigator.of(detailContext).pop();
+                                setState(() {
+                                  _activeNavIndex = 0;
+                                });
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '$obsessionEmoji ${song.title}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: detailTheme.textTheme.bodyLarge?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${song.artist.trim()} • ${_catchemTimeLabel(song.detectedAtMs)} • ${_mapPlayCountLabel(detailContext, songPlayCount)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: detailTheme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 2),
+                            child: IconButton(
+                              tooltip: isFavorite ? l10n.removeFromFavorites : l10n.addToFavorites,
+                              onPressed: () async {
+                                final toggledToFavorite = await widget.controller.toggleCatchemFavorite(mapSongEntry);
+                                if (!mounted || toggledToFavorite == null) {
+                                  return;
+                                }
+                                AppTopFeedback.show(
+                                  context,
+                                  toggledToFavorite ? l10n.favoriteAdded : l10n.favoriteRemoved,
+                                );
+                              },
+                              icon: Icon(
+                                isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: IconButton(
+                              tooltip: l10n.openActivePlayer,
+                              onPressed: () => unawaited(_openCatchemPlayer(mapSongEntry)),
+                              icon: SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    _buildMediaSourceIcon(mapSongEntry.sourcePackage, size: 20),
+                                    Align(
+                                      alignment: Alignment.bottomRight,
+                                      child: Icon(
+                                        Icons.play_arrow_rounded,
+                                        size: 12,
+                                        color: detailTheme.colorScheme.primary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -2509,64 +4044,14 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     );
   }
 
-  List<_CatchemCluster> _clusterCatchemEntries(List<CatchemSongEntry> entries, double zoom) {
-    if (entries.isEmpty) {
-      return const <_CatchemCluster>[];
-    }
-
-    final threshold = (0.18 / math.pow(2, zoom.clamp(1.0, 20.0))).clamp(0.00008, 0.08);
-    final clusters = <_CatchemCluster>[];
-
-    for (final entry in entries) {
-      final lat = entry.latitude;
-      final lng = entry.longitude;
-      if (lat == null || lng == null) {
-        continue;
-      }
-
-      var merged = false;
-      for (var i = 0; i < clusters.length; i++) {
-        final cluster = clusters[i];
-        final dLat = (cluster.center.latitude - lat).abs();
-        final dLng = (cluster.center.longitude - lng).abs();
-        if (dLat <= threshold && dLng <= threshold) {
-          final updatedEntries = <CatchemSongEntry>[...cluster.entries, entry];
-          final avgLat = updatedEntries.map((item) => item.latitude ?? lat).reduce((a, b) => a + b) /
-              updatedEntries.length;
-          final avgLng = updatedEntries.map((item) => item.longitude ?? lng).reduce((a, b) => a + b) /
-              updatedEntries.length;
-          final latestEntry = updatedEntries.reduce(
-            (a, b) => a.lastDetectedAtMs >= b.lastDetectedAtMs ? a : b,
-          );
-          clusters[i] = _CatchemCluster(
-            center: LatLng(avgLat, avgLng),
-            entries: updatedEntries,
-            latestEntry: latestEntry,
-          );
-          merged = true;
-          break;
-        }
-      }
-
-      if (!merged) {
-        clusters.add(
-          _CatchemCluster(
-            center: LatLng(lat, lng),
-            entries: <CatchemSongEntry>[entry],
-            latestEntry: entry,
-          ),
-        );
-      }
-    }
-
-    return clusters;
-  }
-
   Future<void> _showCatchemMap() async {
+    final mapPoints = await widget.controller.loadCatchemMapPoints();
+    if (!mounted) {
+      return;
+    }
     final l10n = AppLocalizations.of(context);
-    final entries = widget.controller.catchemLibrary
-        .where((entry) => entry.latitude != null && entry.longitude != null)
-        .toList(growable: false);
+    final entries = List<CatchemMapPointRecord>.from(mapPoints)
+      ..sort((a, b) => b.detectedAtMs.compareTo(a.detectedAtMs));
 
     if (entries.isEmpty) {
       AppTopFeedback.show(context, l10n.catchemMapNoPoints);
@@ -2574,7 +4059,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     }
 
     final first = entries.first;
-    final center = LatLng(first.latitude!, first.longitude!);
+    final center = LatLng(first.latitude, first.longitude);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -2582,10 +4067,106 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
       isScrollControlled: true,
       builder: (sheetContext) {
         final theme = Theme.of(sheetContext);
-        var currentZoom = 12.4;
+        final isDarkMap = theme.brightness == Brightness.dark;
+        final tileUrlTemplate = isDarkMap
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        final mapController = MapController();
+        var currentZoom = 16.2;
+        var currentCenter = center;
+        var locationRequested = false;
+        final visibleLimitByLocation = <String, int>{};
+        final firstSeenZoomBucketByLocation = <String, int>{};
+        var lastMapDebugSignature = '';
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final clusters = _clusterCatchemEntries(entries, currentZoom);
+            if (!locationRequested) {
+              locationRequested = true;
+              unawaited(() async {
+                final currentLocation = await _tryGetCurrentMapLocation();
+                if (!mounted || currentLocation == null) {
+                  return;
+                }
+                setModalState(() {
+                  currentCenter = currentLocation;
+                });
+                mapController.move(currentLocation, currentZoom);
+              }());
+            }
+
+            final zoomBucket = currentZoom.floor();
+            final groupedByLocation = _groupMapPointsByLocation(
+              points: entries,
+              visibleLimitByLocation: visibleLimitByLocation,
+            );
+
+            final visibleGroups = _visibleLocationGroupsForMap(
+              groups: groupedByLocation,
+              center: currentCenter,
+              zoom: currentZoom,
+            );
+
+            final renderPoints = <_MapRenderedPoint>[];
+            for (final group in visibleGroups) {
+              final slotByAlbumKey = <String, int>{};
+              for (var i = 0; i < group.allAlbumMarkers.length; i++) {
+                final albumKey = _mapAlbumGroupKeyFromPoint(group.allAlbumMarkers[i]);
+                slotByAlbumKey.putIfAbsent(albumKey, () => i);
+              }
+
+              final visibleMarkersSorted = List<CatchemMapPointRecord>.from(group.visibleAlbumMarkers)
+                ..sort((a, b) => b.detectedAtMs.compareTo(a.detectedAtMs));
+              for (var index = 0; index < visibleMarkersSorted.length; index++) {
+                final point = visibleMarkersSorted[index];
+                final albumKey = _mapAlbumGroupKeyFromPoint(point);
+                final stableSlot = slotByAlbumKey[albumKey] ?? index;
+                final markerId = '${group.key}|$albumKey';
+                renderPoints.add(
+                  _MapRenderedPoint(
+                    locationKey: group.key,
+                    markerId: markerId,
+                    localIndex: stableSlot,
+                    point: point,
+                    group: group,
+                  ),
+                );
+              }
+            }
+
+            final renderPointsForLayer = List<_MapRenderedPoint>.from(renderPoints)
+              ..sort((a, b) => a.point.detectedAtMs.compareTo(b.point.detectedAtMs));
+
+            final signature = [
+              'allPoints=${entries.length}',
+              'visibleGroups=${visibleGroups.length}',
+              'renderPoints=${renderPoints.length}',
+              ...visibleGroups.map((group) => '${group.key}:${group.visibleAlbumMarkers.length}/${group.allAlbumMarkers.length}'),
+            ].join('|');
+            if (signature != lastMapDebugSignature) {
+              lastMapDebugSignature = signature;
+              debugPrint(
+                '[MAP_GROUP] modal_state all=${entries.length} groups=${visibleGroups.length} rendered=${renderPoints.length}',
+              );
+            }
+
+            for (final group in visibleGroups) {
+              firstSeenZoomBucketByLocation.putIfAbsent(group.key, () => zoomBucket);
+            }
+
+            final pointsByMarkerKey = <String, _ScatteredMapPoint>{};
+            for (final renderPoint in renderPointsForLayer) {
+              final lat = renderPoint.point.latitude;
+              final lng = renderPoint.point.longitude;
+              final markerKey = renderPoint.markerId;
+              pointsByMarkerKey[markerKey] = _buildScatteredPoint(
+                lat: lat,
+                lng: lng,
+                seedKey: '${renderPoint.point.title}|${renderPoint.point.artist}|${renderPoint.point.detectedAtMs}',
+                localIndex: renderPoint.localIndex,
+                zoom: currentZoom,
+              );
+            }
+
             return SizedBox(
               height: MediaQuery.of(sheetContext).size.height * 0.78,
               child: Column(
@@ -2602,84 +4183,140 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                     ),
                   ),
                   Expanded(
-                    child: FlutterMap(
-                      options: MapOptions(
-                        initialCenter: center,
-                        initialZoom: currentZoom,
-                        onPositionChanged: (position, _) {
-                          final nextZoom = position.zoom;
-                          if ((nextZoom - currentZoom).abs() < 0.08) {
-                            return;
-                          }
-                          setModalState(() {
-                            currentZoom = nextZoom;
-                          });
-                        },
-                      ),
+                    child: Stack(
                       children: [
-                        TileLayer(
-                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                          userAgentPackageName: 'net.iozamudioa.singsync',
-                        ),
-                        MarkerLayer(
-                          markers: clusters.map((cluster) {
-                            final latest = cluster.latestEntry;
-                            final artwork = _buildArtworkImageProvider(latest.artworkUrl);
-                            return Marker(
-                              point: cluster.center,
-                              width: 60,
-                              height: 60,
-                              child: Stack(
-                                clipBehavior: Clip.none,
-                                children: [
-                                  Container(
-                                    width: 52,
-                                    height: 52,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: theme.colorScheme.primary,
-                                        width: 2,
+                        FlutterMap(
+                          mapController: mapController,
+                          options: MapOptions(
+                            initialCenter: center,
+                            initialZoom: currentZoom,
+                            onPositionChanged: (position, _) {
+                              final nextZoom = position.zoom;
+                              final nextCenter = position.center;
+                              final movedEnough =
+                                  (nextCenter.latitude - currentCenter.latitude).abs() > 0.0008 ||
+                                  (nextCenter.longitude - currentCenter.longitude).abs() > 0.0008;
+                              if ((nextZoom - currentZoom).abs() < 0.08 && !movedEnough) {
+                                return;
+                              }
+
+                              final nextZoomBucket = nextZoom.floor();
+                              final priorZoomBucket = currentZoom.floor();
+                              final groupedAtNext = _groupMapPointsByLocation(
+                                points: entries,
+                                visibleLimitByLocation: visibleLimitByLocation,
+                              );
+                              final visibleAtNext = _visibleLocationGroupsForMap(
+                                groups: groupedAtNext,
+                                center: nextCenter,
+                                zoom: nextZoom,
+                              );
+
+                              setModalState(() {
+                                currentZoom = nextZoom;
+                                currentCenter = nextCenter;
+
+                                for (final group in visibleAtNext) {
+                                  firstSeenZoomBucketByLocation.putIfAbsent(group.key, () => nextZoomBucket);
+                                  visibleLimitByLocation.putIfAbsent(group.key, () => 1);
+
+                                  final firstSeenBucket = firstSeenZoomBucketByLocation[group.key] ?? nextZoomBucket;
+                                  if (nextZoomBucket > priorZoomBucket && nextZoomBucket > firstSeenBucket) {
+                                    final steps = nextZoomBucket - firstSeenBucket;
+                                    final targetLimit = 1 + (steps * 10);
+                                    final currentLimit = visibleLimitByLocation[group.key] ?? 1;
+                                    if (targetLimit > currentLimit) {
+                                      visibleLimitByLocation[group.key] = targetLimit;
+                                    }
+                                  }
+                                }
+                              });
+                            },
+                          ),
+                          children: [
+                            TileLayer(
+                              urlTemplate: tileUrlTemplate,
+                              subdomains: const <String>['a', 'b', 'c', 'd'],
+                              userAgentPackageName: 'net.iozamudioa.singsync',
+                            ),
+                            MarkerLayer(
+                              markers: renderPointsForLayer.map((renderPoint) {
+                                final markerKey = renderPoint.markerId;
+                                final markerPoint = pointsByMarkerKey[markerKey];
+                                final entry = renderPoint.point;
+                                final artwork = _buildArtworkImageProvider(entry.artworkUrl);
+                                final position = markerPoint?.point ?? LatLng(entry.latitude, entry.longitude);
+                                final angle = markerPoint?.rotation ?? 0;
+                                return Marker(
+                                  point: position,
+                                  width: 82,
+                                  height: 82,
+                                  child: Transform.rotate(
+                                    angle: angle,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        debugPrint(
+                                          '[MAP_TAP] location="${renderPoint.group.key}" visible=${renderPoint.group.visibleAlbumMarkers.length} total=${renderPoint.group.allAlbumMarkers.length}',
+                                        );
+                                        unawaited(
+                                          _showMapAlbumAtLocationDetail(
+                                            sheetContext: sheetContext,
+                                            l10n: l10n,
+                                            group: renderPoint.group,
+                                            selectedAlbumMarker: renderPoint.point,
+                                          ),
+                                        );
+                                      },
+                                      child: _buildUnifiedMapArtworkMarker(
+                                        theme: theme,
+                                        artwork: artwork,
                                       ),
-                                      image: artwork != null
-                                          ? DecorationImage(image: artwork, fit: BoxFit.cover)
-                                          : null,
-                                      color: artwork == null
-                                          ? theme.colorScheme.primaryContainer
-                                          : null,
                                     ),
-                                    child: artwork == null
-                                        ? Icon(
-                                            Icons.music_note_rounded,
-                                            color: theme.colorScheme.onPrimaryContainer,
-                                          )
-                                        : null,
                                   ),
-                                  if (cluster.entries.length > 1)
-                                    Positioned(
-                                      right: -4,
-                                      bottom: -2,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                        decoration: BoxDecoration(
-                                          color: theme.colorScheme.surface,
-                                          borderRadius: BorderRadius.circular(10),
-                                          border: Border.all(
-                                            color: theme.colorScheme.primary,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          '${cluster.entries.length}',
-                                          style: theme.textTheme.labelSmall?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
+                                );
+                              }).toList(growable: false),
+                            ),
+                          ],
+                        ),
+                        Positioned(
+                          right: 14,
+                          bottom: 14,
+                          child: FloatingActionButton.small(
+                            heroTag: 'map_go_to_current_location',
+                            onPressed: () async {
+                              final currentLocation = await _tryGetCurrentMapLocation();
+                              if (!mounted || currentLocation == null) {
+                                return;
+                              }
+                              setModalState(() {
+                                currentCenter = currentLocation;
+                              });
+                              mapController.move(currentLocation, currentZoom);
+
+                              unawaited(() async {
+                                try {
+                                  final refined = await Geolocator.getCurrentPosition(
+                                    locationSettings: const LocationSettings(
+                                      accuracy: LocationAccuracy.high,
+                                      timeLimit: Duration(seconds: 5),
                                     ),
-                                ],
-                              ),
-                            );
-                          }).toList(growable: false),
+                                  );
+                                  if (!mounted) {
+                                    return;
+                                  }
+                                  final refinedPoint = LatLng(refined.latitude, refined.longitude);
+                                  setModalState(() {
+                                    currentCenter = refinedPoint;
+                                  });
+                                  mapController.move(refinedPoint, currentZoom);
+                                } catch (_) {}
+                              }());
+                            },
+                            tooltip: Localizations.localeOf(sheetContext).languageCode.toLowerCase() == 'es'
+                                ? 'Ir a mi ubicación'
+                                : 'Go to my location',
+                            child: const Icon(Icons.my_location_rounded),
+                          ),
                         ),
                       ],
                     ),
@@ -2848,6 +4485,10 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         final artworkProvider = _buildArtworkImageProvider(artworkUrl);
         final navHorizontalInset =
           (MediaQuery.of(context).size.width * 0.16).clamp(20.0, 88.0).toDouble();
+        final hasSnapshotsDestination = _savedSnapshotUris.isNotEmpty;
+        final effectiveNavIndex = hasSnapshotsDestination
+            ? _activeNavIndex.clamp(0, 3)
+            : _activeNavIndex.clamp(0, 2);
         final backgroundTransitionKey =
             '${widget.controller.songTitle.trim()}|${(artworkUrl ?? '').trim()}';
         _syncWakeLockWithPlayback(
@@ -2883,7 +4524,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                       padding: EdgeInsets.symmetric(horizontal: navHorizontalInset),
                       child: NavigationBar(
                         backgroundColor: Colors.transparent,
-                        selectedIndex: _activeNavIndex,
+                        selectedIndex: effectiveNavIndex,
                         onDestinationSelected: (index) {
                           unawaited(_handleNavTap(index));
                         },
@@ -2894,11 +4535,12 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                             selectedIcon: Icon(Icons.album_rounded),
                             label: '',
                           ),
-                          NavigationDestination(
-                            icon: Icon(Icons.photo_library_outlined, key: _galleryNavIconKey),
-                            selectedIcon: const Icon(Icons.photo_library_rounded),
-                            label: '',
-                          ),
+                          if (hasSnapshotsDestination)
+                            NavigationDestination(
+                              icon: Icon(Icons.photo_library_outlined, key: _galleryNavIconKey),
+                              selectedIcon: const Icon(Icons.photo_library_rounded),
+                              label: '',
+                            ),
                           const NavigationDestination(
                             icon: Icon(Icons.library_music_outlined),
                             selectedIcon: Icon(Icons.library_music_rounded),
@@ -2989,10 +4631,13 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                     );
                   },
                   child: IndexedStack(
-                    index: _activeNavIndex.clamp(0, 2),
+                    index: hasSnapshotsDestination
+                        ? _activeNavIndex.clamp(0, 2)
+                        : (_activeNavIndex == 0 ? 0 : 1),
                     children: [
                       _buildMainPlaybackPage(theme: theme, l10n: l10n),
-                      _buildSavedSnapshotsGalleryPage(theme: theme, l10n: l10n),
+                      if (hasSnapshotsDestination)
+                        _buildSavedSnapshotsGalleryPage(theme: theme, l10n: l10n),
                       _buildMySongsPage(theme: theme, l10n: l10n),
                     ],
                   ),
@@ -3013,14 +4658,60 @@ class _SnapshotSection {
   final List<String> uris;
 }
 
-class _CatchemCluster {
-  const _CatchemCluster({
-    required this.center,
-    required this.entries,
-    required this.latestEntry,
+class _ScatteredMapPoint {
+  const _ScatteredMapPoint({
+    required this.point,
+    required this.rotation,
   });
 
-  final LatLng center;
-  final List<CatchemSongEntry> entries;
-  final CatchemSongEntry latestEntry;
+  final LatLng point;
+  final double rotation;
+}
+
+class _MapLocationGroup {
+  const _MapLocationGroup({
+    required this.key,
+    required this.latitude,
+    required this.longitude,
+    required this.allLocationPoints,
+    required this.allAlbumMarkers,
+    required this.visibleAlbumMarkers,
+  });
+
+  final String key;
+  final double latitude;
+  final double longitude;
+  final List<CatchemMapPointRecord> allLocationPoints;
+  final List<CatchemMapPointRecord> allAlbumMarkers;
+  final List<CatchemMapPointRecord> visibleAlbumMarkers;
+}
+
+class _MapRenderedPoint {
+  const _MapRenderedPoint({
+    required this.locationKey,
+    required this.markerId,
+    required this.localIndex,
+    required this.point,
+    required this.group,
+  });
+
+  final String locationKey;
+  final String markerId;
+  final int localIndex;
+  final CatchemMapPointRecord point;
+  final _MapLocationGroup group;
+}
+
+class _SongPlaybackMapMarker {
+  const _SongPlaybackMapMarker({
+    required this.markerId,
+    required this.point,
+    required this.rotation,
+    required this.playedAtMs,
+  });
+
+  final String markerId;
+  final LatLng point;
+  final double rotation;
+  final int playedAtMs;
 }

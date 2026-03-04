@@ -4,6 +4,7 @@
   "nowPlayingDefaultTitle": "Now Playing",
   "unknownArtist": "Unknown artist",
   "artistLabel": "Artist",
+  "favoritesLabel": "Favorites",
   "motivationStartPlayback": "Play your favorite song and let’s start 🎵",
   "permissionNeededTitle": "Permission required",
   "permissionDialogMessage": "SingSync needs notification access to detect the current song and automatically fetch lyrics.",
@@ -90,12 +91,12 @@
   "removeFromFavorites": "Remove from favorites",
   "favoritesLibrary": "Library",
   "mySongsTitle": "My songs",
-  "catchemTitle": "Catchem",
+  "catchemTitle": "Music Logbook",
   "searchBySongOrArtist": "Search by song or artist",
   "noResults": "No results",
   "noFavoritesYet": "No favorites yet",
-  "noCatchemYet": "No songs caught yet",
-  "catchemDeleted": "Song removed from Catchem",
+  "noCatchemYet": "No songs in your music logbook yet",
+  "catchemDeleted": "Song removed from the music logbook",
   "catchemDetectionCount": "{count, plural, =1{# listen} other{# listens}}",
   "@catchemDetectionCount": {
     "placeholders": {
@@ -172,6 +173,22 @@
   "retryingMatches": "Retrying matches on lrclib...",
   "lrclibUnavailable": "Could not query lrclib right now.",
   "todayLabel": "Today",
+  "yesterdayLabel": "Yesterday",
+  "thisMonthLabel": "This month",
+  "loadMoreLabel": "Load more",
+  "catchemPlayedSongsCount": "{count, plural, =1{# played song} other{# played songs}}",
+  "@catchemPlayedSongsCount": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "catchemNoPlaybackHistoryYet": "No playback records yet",
+  "catchemObsessionCaught": "Caught song 🕵️",
+  "catchemObsessionRadar": "On the radar 🛰️",
+  "catchemObsessionLoop": "Infinite loop 🔄",
+  "catchemObsessionToday": "Obsession of the day 🔥",
+  "catchemChoosePlayerTitle": "Choose player",
+  "catchemNoPlayersAvailable": "No installed players available",
   "thisWeekLabel": "This week",
   "olderLabel": "Older",
   "sleepTimerMenuTitle": "Sleep timer",

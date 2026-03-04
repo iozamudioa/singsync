@@ -122,6 +122,12 @@ abstract class AppLocalizations {
   /// **'Artista'**
   String get artistLabel;
 
+  /// No description provided for @favoritesLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Favoritos'**
+  String get favoritesLabel;
+
   /// No description provided for @motivationStartPlayback.
   ///
   /// In es, this message translates to:
@@ -515,7 +521,7 @@ abstract class AppLocalizations {
   /// No description provided for @catchemTitle.
   ///
   /// In es, this message translates to:
-  /// **'Catchem'**
+  /// **'Bitácora musical'**
   String get catchemTitle;
 
   /// No description provided for @searchBySongOrArtist.
@@ -539,13 +545,13 @@ abstract class AppLocalizations {
   /// No description provided for @noCatchemYet.
   ///
   /// In es, this message translates to:
-  /// **'Aún no has atrapado canciones'**
+  /// **'Aún no hay canciones en tu bitácora musical'**
   String get noCatchemYet;
 
   /// No description provided for @catchemDeleted.
   ///
   /// In es, this message translates to:
-  /// **'Canción eliminada de Catchem'**
+  /// **'Canción eliminada de la bitácora musical'**
   String get catchemDeleted;
 
   /// No description provided for @catchemDetectionCount.
@@ -811,6 +817,72 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Hoy'**
   String get todayLabel;
+
+  /// No description provided for @yesterdayLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Ayer'**
+  String get yesterdayLabel;
+
+  /// No description provided for @thisMonthLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Este mes'**
+  String get thisMonthLabel;
+
+  /// No description provided for @loadMoreLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver más'**
+  String get loadMoreLabel;
+
+  /// No description provided for @catchemPlayedSongsCount.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =1{# canción reproducida} other{# canciones reproducidas}}'**
+  String catchemPlayedSongsCount(num count);
+
+  /// No description provided for @catchemNoPlaybackHistoryYet.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin reproducciones registradas todavía'**
+  String get catchemNoPlaybackHistoryYet;
+
+  /// No description provided for @catchemObsessionCaught.
+  ///
+  /// In es, this message translates to:
+  /// **'Cancion atrapada 🕵️'**
+  String get catchemObsessionCaught;
+
+  /// No description provided for @catchemObsessionRadar.
+  ///
+  /// In es, this message translates to:
+  /// **'En el radar 🛰️'**
+  String get catchemObsessionRadar;
+
+  /// No description provided for @catchemObsessionLoop.
+  ///
+  /// In es, this message translates to:
+  /// **'En bucle infinito 🔄'**
+  String get catchemObsessionLoop;
+
+  /// No description provided for @catchemObsessionToday.
+  ///
+  /// In es, this message translates to:
+  /// **'Obsesión del día 🔥'**
+  String get catchemObsessionToday;
+
+  /// No description provided for @catchemChoosePlayerTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Elegir reproductor'**
+  String get catchemChoosePlayerTitle;
+
+  /// No description provided for @catchemNoPlayersAvailable.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay reproductores instalados disponibles'**
+  String get catchemNoPlayersAvailable;
 
   /// No description provided for @thisWeekLabel.
   ///

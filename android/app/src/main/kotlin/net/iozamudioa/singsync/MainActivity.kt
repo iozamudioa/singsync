@@ -61,11 +61,15 @@ class MainActivity: FlutterActivity() {
 					val sourcePackage = call.argument<String>("sourcePackage")
 					val selectedPackage = call.argument<String>("selectedPackage")
 					val searchQuery = call.argument<String>("searchQuery")
+					val targetTitle = call.argument<String>("targetTitle")
+					val targetArtist = call.argument<String>("targetArtist")
 					result.success(
 						NowPlayingNotificationListener.openActivePlayer(
 							sourcePackage = sourcePackage,
 							selectedPackage = selectedPackage,
 							searchQuery = searchQuery,
+							targetTitle = targetTitle,
+							targetArtist = targetArtist,
 						),
 					)
 				}

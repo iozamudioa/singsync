@@ -39,6 +39,8 @@ class PlatformLyricsGateway {
     String? sourcePackage,
     String? selectedPackage,
     String? searchQuery,
+    String? targetTitle,
+    String? targetArtist,
   }) async {
     final response = await _nowPlayingMethodsChannel.invokeMethod<dynamic>(
       'openActivePlayer',
@@ -46,6 +48,8 @@ class PlatformLyricsGateway {
         'sourcePackage': sourcePackage,
         'selectedPackage': selectedPackage,
         'searchQuery': searchQuery,
+        'targetTitle': targetTitle,
+        'targetArtist': targetArtist,
       },
     );
     return response == true;

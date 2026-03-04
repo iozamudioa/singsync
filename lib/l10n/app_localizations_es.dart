@@ -21,6 +21,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get artistLabel => 'Artista';
 
   @override
+  String get favoritesLabel => 'Favoritos';
+
+  @override
   String get motivationStartPlayback =>
       'Pon tu canción favorita y empezamos 🎵';
 
@@ -230,7 +233,7 @@ class AppLocalizationsEs extends AppLocalizations {
   String get mySongsTitle => 'Mis canciones';
 
   @override
-  String get catchemTitle => 'Catchem';
+  String get catchemTitle => 'Bitácora musical';
 
   @override
   String get searchBySongOrArtist => 'Buscar por canción o artista';
@@ -242,10 +245,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get noFavoritesYet => 'No hay favoritos aún';
 
   @override
-  String get noCatchemYet => 'Aún no has atrapado canciones';
+  String get noCatchemYet => 'Aún no hay canciones en tu bitácora musical';
 
   @override
-  String get catchemDeleted => 'Canción eliminada de Catchem';
+  String get catchemDeleted => 'Canción eliminada de la bitácora musical';
 
   @override
   String catchemDetectionCount(num count) {
@@ -407,6 +410,49 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get todayLabel => 'Hoy';
+
+  @override
+  String get yesterdayLabel => 'Ayer';
+
+  @override
+  String get thisMonthLabel => 'Este mes';
+
+  @override
+  String get loadMoreLabel => 'Ver más';
+
+  @override
+  String catchemPlayedSongsCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# canciones reproducidas',
+      one: '# canción reproducida',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get catchemNoPlaybackHistoryYet =>
+      'Sin reproducciones registradas todavía';
+
+  @override
+  String get catchemObsessionCaught => 'Cancion atrapada 🕵️';
+
+  @override
+  String get catchemObsessionRadar => 'En el radar 🛰️';
+
+  @override
+  String get catchemObsessionLoop => 'En bucle infinito 🔄';
+
+  @override
+  String get catchemObsessionToday => 'Obsesión del día 🔥';
+
+  @override
+  String get catchemChoosePlayerTitle => 'Elegir reproductor';
+
+  @override
+  String get catchemNoPlayersAvailable =>
+      'No hay reproductores instalados disponibles';
 
   @override
   String get thisWeekLabel => 'Esta semana';

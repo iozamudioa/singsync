@@ -21,6 +21,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get artistLabel => 'Artist';
 
   @override
+  String get favoritesLabel => 'Favorites';
+
+  @override
   String get motivationStartPlayback =>
       'Play your favorite song and let’s start 🎵';
 
@@ -229,7 +232,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mySongsTitle => 'My songs';
 
   @override
-  String get catchemTitle => 'Catchem';
+  String get catchemTitle => 'Music Logbook';
 
   @override
   String get searchBySongOrArtist => 'Search by song or artist';
@@ -241,10 +244,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get noFavoritesYet => 'No favorites yet';
 
   @override
-  String get noCatchemYet => 'No songs caught yet';
+  String get noCatchemYet => 'No songs in your music logbook yet';
 
   @override
-  String get catchemDeleted => 'Song removed from Catchem';
+  String get catchemDeleted => 'Song removed from the music logbook';
 
   @override
   String catchemDetectionCount(num count) {
@@ -399,6 +402,47 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get todayLabel => 'Today';
+
+  @override
+  String get yesterdayLabel => 'Yesterday';
+
+  @override
+  String get thisMonthLabel => 'This month';
+
+  @override
+  String get loadMoreLabel => 'Load more';
+
+  @override
+  String catchemPlayedSongsCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# played songs',
+      one: '# played song',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get catchemNoPlaybackHistoryYet => 'No playback records yet';
+
+  @override
+  String get catchemObsessionCaught => 'Caught song 🕵️';
+
+  @override
+  String get catchemObsessionRadar => 'On the radar 🛰️';
+
+  @override
+  String get catchemObsessionLoop => 'Infinite loop 🔄';
+
+  @override
+  String get catchemObsessionToday => 'Obsession of the day 🔥';
+
+  @override
+  String get catchemChoosePlayerTitle => 'Choose player';
+
+  @override
+  String get catchemNoPlayersAvailable => 'No installed players available';
 
   @override
   String get thisWeekLabel => 'This week';

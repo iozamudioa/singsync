@@ -137,9 +137,23 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         sourcePackage: String?,
         selectedPackage: String?,
         searchQuery: String?,
+        targetTitle: String?,
+        targetArtist: String?,
     ): Boolean {
         val query = searchQuery?.trim().orEmpty()
         val selected = selectedPackage?.trim().orEmpty()
+        val desiredTitle = targetTitle?.trim().orEmpty()
+        val desiredArtist = targetArtist?.trim().orEmpty()
+
+        if (selected.isNotEmpty() && isTargetTrackAlreadyActive(
+                sourcePackage = selected,
+                targetTitle = desiredTitle,
+                targetArtist = desiredArtist,
+            )) {
+            if (launchPackageApp(selected)) {
+                return true
+            }
+        }
 
         if (selected.isNotEmpty() && query.isNotEmpty()) {
             if (openSelectedAppWithQuery(packageName = selected, query = query)) {
@@ -164,6 +178,17 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         }
 
         for (packageName in candidates) {
+            if (isTargetTrackAlreadyActive(
+                    sourcePackage = packageName,
+                    targetTitle = desiredTitle,
+                    targetArtist = desiredArtist,
+                )) {
+                val opened = launchPackageApp(packageName)
+                if (opened) {
+                    return true
+                }
+            }
+
             val opened = launchPackageApp(packageName)
 
             if (opened) {
@@ -172,6 +197,70 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         }
 
         return false
+    }
+
+    private fun normalizeTrackText(value: String): String {
+        return value.trim().lowercase().replace(Regex("\\s+"), " ")
+    }
+
+    private fun isTargetTrackAlreadyActive(
+        sourcePackage: String,
+        targetTitle: String,
+        targetArtist: String,
+    ): Boolean {
+        val normalizedTitle = normalizeTrackText(targetTitle)
+        if (normalizedTitle.isEmpty()) {
+            return false
+        }
+
+        val controller = findBestMediaController(sourcePackage) ?: return false
+        val state = controller.playbackState?.state
+        val playbackIsActive = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+        if (!playbackIsActive) {
+            return false
+        }
+
+        val metadata = controller.metadata
+        val currentTitle = metadata?.getText(MediaMetadata.METADATA_KEY_TITLE)
+            ?.toString()
+            ?.trim()
+            .orEmpty()
+            .ifEmpty {
+                metadata?.getText(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+                    ?.toString()
+                    ?.trim()
+                    .orEmpty()
+            }
+            .ifEmpty {
+                metadata?.description?.title?.toString()?.trim().orEmpty()
+            }
+
+        val currentArtist = metadata?.getText(MediaMetadata.METADATA_KEY_ARTIST)
+            ?.toString()
+            ?.trim()
+            .orEmpty()
+            .ifEmpty {
+                metadata?.getText(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                    ?.toString()
+                    ?.trim()
+                    .orEmpty()
+            }
+            .ifEmpty {
+                metadata?.description?.subtitle?.toString()?.trim().orEmpty()
+            }
+
+        val normalizedCurrentTitle = normalizeTrackText(currentTitle)
+        if (normalizedCurrentTitle.isEmpty() || normalizedCurrentTitle != normalizedTitle) {
+            return false
+        }
+
+        val normalizedTargetArtist = normalizeTrackText(targetArtist)
+        if (normalizedTargetArtist.isEmpty()) {
+            return true
+        }
+
+        val normalizedCurrentArtist = normalizeTrackText(currentArtist)
+        return normalizedCurrentArtist.isNotEmpty() && normalizedCurrentArtist == normalizedTargetArtist
     }
 
     private fun findBestMediaController(sourcePackage: String?): MediaController? {
@@ -758,7 +847,7 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             ?: directArtist
             ?: rawText.takeIf { it.isNotBlank() && !looksLikeHelperText(it) }
             ?: rawSubText.takeIf { it.isNotBlank() && !looksLikeHelperText(it) }
-            ?: UNKNOWN_ARTIST
+            ?: ""
 
         if (title.isBlank() || artist.isBlank()) {
             Log.i(TAG, "PIXEL_HEURISTIC_REJECT reason=blank title='$title' artist='$artist'")
@@ -846,9 +935,9 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         val artist = artistCandidates.firstOrNull {
             !it.equals(title, ignoreCase = true)
         }
-            ?: UNKNOWN_ARTIST
+            ?: ""
 
-        if (title.isBlank()) {
+        if (title.isBlank() || artist.isBlank()) {
             return null
         }
 
@@ -1167,6 +1256,7 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             val memoryScore = memoryBoost(right, knownArtists)
             var finalScore = heuristicScore + memoryScore
             val wordCount = countWords(right)
+            val rightWords = tokenizeWords(right)
 
             if (wordCount <= 2 && bestWordCount >= 3) {
                 finalScore -= 4
@@ -1174,6 +1264,16 @@ class NowPlayingNotificationListener : NotificationListenerService() {
 
             if (right.lowercase().contains(" de ")) {
                 finalScore += 2
+            }
+
+            val hasLaterDe = positions.any { laterPos -> laterPos > pos }
+            if (
+                hasLaterDe &&
+                right.lowercase().contains(" de ") &&
+                rightWords.isNotEmpty() &&
+                rightWords.first() in DE_AMBIGUOUS_PREFIXES
+            ) {
+                finalScore -= 14
             }
 
             if (wordCount <= 2 && allWordsInSet(right, PLACE_WORDS)) {
@@ -1190,6 +1290,16 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         }
 
         if (bestScore <= 0) {
+            val pos = positions.last()
+            bestSong = normalized.substring(0, pos).trim()
+            bestArtist = normalized.substring(pos + 4).trim()
+        }
+
+        if (
+            positions.size > 1 &&
+            bestArtist.lowercase().contains(" de ") &&
+            tokenizeWords(bestArtist).firstOrNull() in DE_AMBIGUOUS_PREFIXES
+        ) {
             val pos = positions.last()
             bestSong = normalized.substring(0, pos).trim()
             bestArtist = normalized.substring(pos + 4).trim()
@@ -1413,11 +1523,15 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             sourcePackage: String?,
             selectedPackage: String?,
             searchQuery: String?,
+            targetTitle: String?,
+            targetArtist: String?,
         ): Boolean {
             return activeInstance?.openActiveMediaPlayerApp(
                 sourcePackage = sourcePackage,
                 selectedPackage = selectedPackage,
                 searchQuery = searchQuery,
+                targetTitle = targetTitle,
+                targetArtist = targetArtist,
             ) == true
         }
 
@@ -1447,7 +1561,6 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             val durationSec: Int? = null,
         )
 
-        private const val UNKNOWN_ARTIST = "Artista desconocido"
         private const val TAG = "PIXEL_NOW_PLAYING"
         private const val SOURCE_TYPE_PIXEL = "pixel_now_playing"
         private const val SOURCE_TYPE_PLAYER = "media_player"
@@ -1539,6 +1652,9 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         private val PLACE_WORDS = setOf(
             "leon", "mexico", "texas", "michoacan", "jalisco", "durango",
             "sinaloa", "sonora", "chihuahua", "tijuana", "juarez",
+        )
+        private val DE_AMBIGUOUS_PREFIXES = setOf(
+            "el", "la", "los", "las",
         )
         private const val MEMORY_MATCH = 12
         private const val MEMORY_CONTAINS = 7
