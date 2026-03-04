@@ -230,6 +230,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get mySongsTitle => 'Mis canciones';
 
   @override
+  String get catchemTitle => 'Catchem';
+
+  @override
   String get searchBySongOrArtist => 'Buscar por canción o artista';
 
   @override
@@ -237,6 +240,87 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get noFavoritesYet => 'No hay favoritos aún';
+
+  @override
+  String get noCatchemYet => 'Aún no has atrapado canciones';
+
+  @override
+  String get catchemDeleted => 'Canción eliminada de Catchem';
+
+  @override
+  String catchemDetectionCount(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '# escuchas',
+      one: '# escucha',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String catchemCaptureMode(Object mode) {
+    return 'Captura: $mode';
+  }
+
+  @override
+  String get catchemCaptureManual => 'Manual';
+
+  @override
+  String get catchemCaptureAutomatic => 'Automática';
+
+  @override
+  String catchemCaptureHistoryTitle(Object song) {
+    return 'Capturas de $song';
+  }
+
+  @override
+  String catchemLastHeard(Object date, Object time) {
+    return 'Última vez escuchada fecha: $date hora: $time';
+  }
+
+  @override
+  String catchemTimestamp(Object date, Object time) {
+    return 'Fecha: $date Hora: $time';
+  }
+
+  @override
+  String get catchemTimestampUnknown => 'Fecha: --/--/---- Hora: --:--';
+
+  @override
+  String get catchemOpenMap => 'Ver mapa de capturas';
+
+  @override
+  String get catchemMapTitle => 'Mapa de canciones capturadas';
+
+  @override
+  String get catchemMapNoPoints => 'Aún no hay capturas con ubicación';
+
+  @override
+  String catchemLyricsSource(Object source) {
+    return 'Fuente: $source';
+  }
+
+  @override
+  String get catchemSourceCache => 'caché local';
+
+  @override
+  String get catchemSourceGetCached => 'LRCLIB GET-CACHED';
+
+  @override
+  String get catchemSourceGet => 'LRCLIB GET';
+
+  @override
+  String get catchemSourceSearchTrackArtist => 'LRCLIB SEARCH track/artist';
+
+  @override
+  String get catchemSourceSearchQuery => 'LRCLIB SEARCH q';
+
+  @override
+  String get catchemSourceLrclib => 'LRCLIB';
+
+  @override
+  String get catchemSourceUnknown => 'desconocida';
 
   @override
   String get savedSnapshotsTitle => 'Portadas para el recuerdo';

@@ -206,11 +206,6 @@ extension _NowPlayingTabUi on _NowPlayingTabState {
           spacing: 8,
           runSpacing: 4,
           children: [
-            TextButton.icon(
-              onPressed: controller.exitManualSearchMode,
-              icon: const Icon(Icons.arrow_back_rounded),
-              label: Text(AppLocalizations.of(context).back),
-            ),
             if (!controller.isManualSearchFormVisible)
               TextButton.icon(
                 onPressed: controller.showManualSearchForm,

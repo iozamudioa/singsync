@@ -15,6 +15,31 @@ function Assert-LastExitCode([string]$stepLabel) {
   }
 }
 
+function Assert-AdbAvailable {
+  $adb = Get-Command adb -ErrorAction SilentlyContinue
+  if (-not $adb) {
+    throw "No se encontró 'adb' en PATH. Instala Android Platform Tools o abre una terminal con adb disponible."
+  }
+}
+
+function Ensure-AdbServerActive {
+  $probe = adb devices 2>&1 | Out-String
+  $probeOk = $LASTEXITCODE -eq 0
+  $daemonMissing = $probe -match 'daemon not running|cannot connect to daemon|daemon not running; starting now'
+
+  if (-not $probeOk -or $daemonMissing) {
+    Write-Host "ADB server no activo. Iniciando adb start-server..." -ForegroundColor Yellow
+    adb start-server | Out-Null
+    Assert-LastExitCode '[C/6] adb start-server'
+    Start-Sleep -Milliseconds 350
+    $probe = adb devices 2>&1 | Out-String
+    Assert-LastExitCode '[C/6] adb devices (post-start-server)'
+    return
+  }
+
+  Write-Host "ADB server activo." -ForegroundColor DarkCyan
+}
+
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $projectRoot
 
@@ -66,8 +91,8 @@ $artifactApkPath = Join-Path $artifactsDir "app-$Profile-$buildMode-$buildTimest
 Copy-Item -Path $apkPath -Destination $artifactApkPath -Force
 
 Write-Host "[C/6] Verificando dispositivo ADB..." -ForegroundColor Cyan
-adb start-server | Out-Null
-Assert-LastExitCode '[C/6] adb start-server'
+Assert-AdbAvailable
+Ensure-AdbServerActive
 $adbDevices = adb devices -l | Out-String
 Assert-LastExitCode '[C/6] adb devices -l'
 $connectedDevices = @()

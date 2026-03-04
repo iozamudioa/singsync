@@ -90,9 +90,63 @@
   "removeFromFavorites": "Remove from favorites",
   "favoritesLibrary": "Library",
   "mySongsTitle": "My songs",
+  "catchemTitle": "Catchem",
   "searchBySongOrArtist": "Search by song or artist",
   "noResults": "No results",
   "noFavoritesYet": "No favorites yet",
+  "noCatchemYet": "No songs caught yet",
+  "catchemDeleted": "Song removed from Catchem",
+  "catchemDetectionCount": "{count, plural, =1{# listen} other{# listens}}",
+  "@catchemDetectionCount": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "catchemCaptureMode": "Capture: {mode}",
+  "@catchemCaptureMode": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "catchemCaptureManual": "Manual",
+  "catchemCaptureAutomatic": "Automatic",
+  "catchemCaptureHistoryTitle": "Captures for {song}",
+  "@catchemCaptureHistoryTitle": {
+    "placeholders": {
+      "song": {}
+    }
+  },
+  "catchemLastHeard": "Last heard date: {date} time: {time}",
+  "@catchemLastHeard": {
+    "placeholders": {
+      "date": {},
+      "time": {}
+    }
+  },
+  "catchemTimestamp": "Date: {date} Time: {time}",
+  "@catchemTimestamp": {
+    "placeholders": {
+      "date": {},
+      "time": {}
+    }
+  },
+  "catchemTimestampUnknown": "Date: --/--/---- Time: --:--",
+  "catchemOpenMap": "Open captures map",
+  "catchemMapTitle": "Captured songs map",
+  "catchemMapNoPoints": "No captures with location yet",
+  "catchemLyricsSource": "Source: {source}",
+  "@catchemLyricsSource": {
+    "placeholders": {
+      "source": {}
+    }
+  },
+  "catchemSourceCache": "local cache",
+  "catchemSourceGetCached": "LRCLIB GET-CACHED",
+  "catchemSourceGet": "LRCLIB GET",
+  "catchemSourceSearchTrackArtist": "LRCLIB SEARCH track/artist",
+  "catchemSourceSearchQuery": "LRCLIB SEARCH q",
+  "catchemSourceLrclib": "LRCLIB",
+  "catchemSourceUnknown": "unknown",
   "savedSnapshotsTitle": "Cover Memories",
   "noSavedSnapshotsYet": "No saved images yet",
   "delete": "Delete",

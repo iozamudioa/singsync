@@ -6,7 +6,13 @@ import org.json.JSONObject
 import java.net.URLEncoder
 
 interface LyricsProvider {
-    fun fetchLyrics(title: String, artist: String, preferSynced: Boolean): Map<String, Any?>
+    fun fetchLyrics(
+        title: String,
+        artist: String,
+        preferSynced: Boolean,
+        albumName: String?,
+        durationSec: Int?,
+    ): Map<String, Any?>
     fun searchLyricsCandidates(query: String): List<Map<String, String>>
 }
 
@@ -19,15 +25,48 @@ object LrcLibLyricsProvider : LyricsProvider {
     private const val TAG = "LRCLIB_NATIVE"
     private val apiHttpHelper = ApiHttpHelper()
 
-    override fun fetchLyrics(title: String, artist: String, preferSynced: Boolean): Map<String, Any?> {
+    override fun fetchLyrics(
+        title: String,
+        artist: String,
+        preferSynced: Boolean,
+        albumName: String?,
+        durationSec: Int?,
+    ): Map<String, Any?> {
         val cleanTitle = title.trim()
         val cleanArtist = artist.trim()
+        val cleanAlbum = albumName?.trim().orEmpty()
+        val cleanDurationSec = durationSec?.takeIf { it > 0 }
         val debugSteps = mutableListOf<String>()
+        val signatureParams = linkedMapOf<String, String>(
+            "track_name" to cleanTitle,
+            "artist_name" to cleanArtist,
+        ).apply {
+            if (cleanAlbum.isNotEmpty()) {
+                put("album_name", cleanAlbum)
+            }
+            if (cleanDurationSec != null) {
+                put("duration", cleanDurationSec.toString())
+            }
+        }
 
         return try {
+            val getCachedUrl = buildUrl(
+                path = "/api/get-cached",
+                params = signatureParams,
+            )
+            debugSteps += "GET-CACHED $getCachedUrl"
+            val getCachedResult = requestLyricsResult(getCachedUrl, debugSteps, preferSynced)
+            debugSteps += "GET-CACHED status=${getCachedResult.status}"
+
+            getCachedResult.lyrics?.let {
+                debugSteps += "GET-CACHED hit lyricsLength=${it.length}"
+                logDebug(debugSteps)
+                return mapOf("lyrics" to it, "debug" to debugSteps, "metadata" to getCachedResult.metadata)
+            }
+
             val getUrl = buildUrl(
                 path = "/api/get",
-                params = mapOf("track_name" to cleanTitle, "artist_name" to cleanArtist),
+                params = signatureParams,
             )
             debugSteps += "GET $getUrl"
             val getResult = requestLyricsResult(getUrl, debugSteps, preferSynced)
@@ -63,7 +102,7 @@ object LrcLibLyricsProvider : LyricsProvider {
                         mapOf("lyrics" to it, "debug" to debugSteps, "metadata" to queryResult.metadata)
                     } ?: run {
                         logDebug(debugSteps)
-                        mapOf(
+                        return mapOf(
                             "lyrics" to "No se encontró letra para esta canción en lrclib.",
                             "debug" to debugSteps,
                             "metadata" to null,
@@ -74,7 +113,7 @@ object LrcLibLyricsProvider : LyricsProvider {
         } catch (error: Exception) {
             debugSteps += "exception=${error::class.java.simpleName}: ${error.message}"
             logDebug(debugSteps)
-            mapOf(
+            return mapOf(
                 "lyrics" to "No fue posible consultar lrclib en este momento.",
                 "debug" to debugSteps,
                 "metadata" to null,

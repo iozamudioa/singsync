@@ -92,6 +92,7 @@ class LyricsPanel extends StatefulWidget {
 class _LyricsPanelState extends State<LyricsPanel>
   with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   static const Size _snapshotPreviewBaseSize = Size(190, 238);
+  static const int _timedLyricsLeadMs = 180;
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
     'net.iozamudioa.singsync/lyrics',
   );
@@ -965,12 +966,14 @@ class _LyricsPanelState extends State<LyricsPanel>
       return -1;
     }
 
+    final effectivePlaybackMs = math.max(0, playbackPositionMs + _timedLyricsLeadMs);
+
     var left = 0;
     var right = _timedLines.length - 1;
     var answer = -1;
     while (left <= right) {
       final mid = (left + right) ~/ 2;
-      if (_timedLines[mid].timestampMs <= playbackPositionMs) {
+      if (_timedLines[mid].timestampMs <= effectivePlaybackMs) {
         answer = mid;
         left = mid + 1;
       } else {

@@ -65,7 +65,6 @@ class NowPlayingNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        Log.i(TAG, "onNotificationPosted package=${sbn?.packageName}")
         if (sbn == null) {
             return
         }
@@ -365,8 +364,22 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             METADATA_LONG_KEYS.contains(key) -> metadata.getLong(key)
             METADATA_BITMAP_KEYS.contains(key) -> bitmapToMap(metadata.getBitmap(key))
             METADATA_RATING_KEYS.contains(key) -> ratingToMap(metadata.getRating(key))
-            else -> metadata.getText(key)?.toString()
+            METADATA_TEXT_KEYS.contains(key) -> metadata.getText(key)?.toString()
                 ?: metadata.getString(key)
+            else -> readUnknownMetadataValue(metadata, key)
+        }
+    }
+
+    private fun readUnknownMetadataValue(metadata: MediaMetadata, key: String): Any? {
+        return try {
+            val value = metadata.getLong(key)
+            if (value != 0L) {
+                value
+            } else {
+                null
+            }
+        } catch (_: Throwable) {
+            null
         }
     }
 
@@ -479,7 +492,7 @@ class NowPlayingNotificationListener : NotificationListenerService() {
     }
 
     private fun logActiveSessionSnapshot(sourcePackage: String?) {
-        if (!DEBUG_SESSION_SNAPSHOT_LOGS) {
+        if (!isSessionSnapshotDebugEnabled()) {
             return
         }
 
@@ -516,6 +529,23 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         }
 
         Log.i(TAG, "SESSION_SNAPSHOT_JSON_END id=$snapshotId")
+    }
+
+    private fun isSessionSnapshotDebugEnabled(): Boolean {
+        val internalFlag = File(filesDir, DEBUG_SESSION_SNAPSHOT_FLAG_FILE)
+        if (internalFlag.exists()) {
+            return true
+        }
+
+        val externalDir = getExternalFilesDir(null)
+        if (externalDir != null) {
+            val externalFlag = File(externalDir, DEBUG_SESSION_SNAPSHOT_FLAG_FILE)
+            if (externalFlag.exists()) {
+                return true
+            }
+        }
+
+        return false
     }
 
     private fun launchPackageApp(packageName: String): Boolean {
@@ -615,6 +645,8 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             sourcePackage = payload.sourcePackage,
             sourceType = payload.sourceType,
             artworkUrl = payload.artworkUrl,
+            albumName = payload.albumName,
+            durationSec = payload.durationSec,
         )
     }
 
@@ -663,6 +695,11 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             ?.trim()
             .orEmpty()
 
+        Log.i(
+            TAG,
+            "PIXEL_HEURISTIC_INPUT package=$packageName title='$rawTitle' titleBig='$rawBigTitle' text='$rawText' subText='$rawSubText'",
+        )
+
         val directTitle = listOf(rawTitle, rawBigTitle)
             .firstOrNull { it.isNotBlank() && !looksLikeHelperText(it) }
 
@@ -674,11 +711,17 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             }
 
         if (!directTitle.isNullOrBlank() && !directArtist.isNullOrBlank()) {
+            Log.i(
+                TAG,
+                "PIXEL_HEURISTIC_OUTPUT mode=direct title='$directTitle' artist='$directArtist'",
+            )
             return NowPlayingPayload(
                 title = directTitle,
                 artist = directArtist,
                 sourcePackage = packageName,
                 sourceType = SOURCE_TYPE_PIXEL,
+                albumName = null,
+                durationSec = null,
             )
         }
 
@@ -702,26 +745,35 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             .mapNotNull { parseSongAndArtistSentence(it) }
             .firstOrNull()
 
+        Log.i(
+            TAG,
+            "PIXEL_HEURISTIC_OUTPUT mode=parsed parsedTitle='${parsedFromSentence?.first ?: ""}' parsedArtist='${parsedFromSentence?.second ?: ""}'",
+        )
+
         val title = parsedFromSentence?.first
             ?: directTitle
             ?: rawTitle
 
         val artist = parsedFromSentence?.second
             ?: directArtist
-            ?: rawText.takeUnless { looksLikeHelperText(it) }
-            ?: rawSubText.takeUnless { looksLikeHelperText(it) }
+            ?: rawText.takeIf { it.isNotBlank() && !looksLikeHelperText(it) }
+            ?: rawSubText.takeIf { it.isNotBlank() && !looksLikeHelperText(it) }
             ?: UNKNOWN_ARTIST
 
         if (title.isBlank() || artist.isBlank()) {
-            Log.i(TAG, "ignored blank title/artist title='$title' artist='$artist'")
+            Log.i(TAG, "PIXEL_HEURISTIC_REJECT reason=blank title='$title' artist='$artist'")
             return null
         }
+
+        Log.i(TAG, "PIXEL_HEURISTIC_ACCEPT title='$title' artist='$artist'")
 
         return NowPlayingPayload(
             title = title,
             artist = artist,
             sourcePackage = packageName,
             sourceType = SOURCE_TYPE_PIXEL,
+            albumName = null,
+            durationSec = null,
         )
     }
 
@@ -806,12 +858,34 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             extras = extras,
         )
 
+        val albumCandidates = listOf(
+            metadataText(MediaMetadata.METADATA_KEY_ALBUM),
+            metadata?.description?.description?.toString()?.trim().orEmpty(),
+            rawSubText,
+        )
+            .filter {
+                it.isNotBlank() &&
+                    !looksLikeHelperText(it) &&
+                    !it.equals(title, ignoreCase = true) &&
+                    !it.equals(artist, ignoreCase = true)
+            }
+        val albumName = albumCandidates.firstOrNull()
+
+        val durationMs = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: -1L
+        val durationSec = if (durationMs > 0L) {
+            ((durationMs + 500L) / 1000L).toInt()
+        } else {
+            null
+        }
+
         return NowPlayingPayload(
             title = title,
             artist = artist,
             sourcePackage = packageName,
             sourceType = SOURCE_TYPE_PLAYER,
             artworkUrl = artworkUrl,
+            albumName = albumName,
+            durationSec = durationSec,
         )
     }
 
@@ -979,6 +1053,12 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         if (!artworkUrl.isNullOrBlank()) {
             payload["artworkUrl"] = artworkUrl
         }
+        if (!albumName.isNullOrBlank()) {
+            payload["albumName"] = albumName
+        }
+        if (durationSec != null && durationSec > 0) {
+            payload["durationSec"] = durationSec.toString()
+        }
         return payload
     }
 
@@ -1019,6 +1099,11 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             return fromDe
         }
 
+        val directFromDe = parseSongArtistByLastDe(normalized)
+        if (directFromDe != null) {
+            return directFromDe
+        }
+
         val bySplitRegex = Regex("\\s+by\\s+", RegexOption.IGNORE_CASE)
         val byMatches = bySplitRegex.findAll(normalized).toList()
         if (byMatches.isNotEmpty()) {
@@ -1033,12 +1118,30 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         return null
     }
 
+    private fun parseSongArtistByLastDe(text: String): Pair<String, String>? {
+        val normalized = normalize(text)
+        val marker = " de "
+        val pos = normalized.lowercase().lastIndexOf(marker)
+        if (pos <= 0) {
+            return null
+        }
+
+        val song = normalized.substring(0, pos).trim().trim('"')
+        val artist = normalized.substring(pos + marker.length).trim().trim('"')
+        if (song.isBlank() || artist.isBlank()) {
+            return null
+        }
+
+        return song to artist
+    }
+
     private fun parseSongArtistFromDeText(text: String): Pair<String, String>? {
         if (text.isBlank()) {
             return null
         }
 
         val normalized = normalize(text)
+        Log.i(TAG, "PIXEL_HEURISTIC_DE_INPUT text='$normalized'")
         if (normalized.isBlank()) {
             return null
         }
@@ -1096,10 +1199,12 @@ class NowPlayingNotificationListener : NotificationListenerService() {
         val artist = bestArtist.trim().trim('"')
 
         if (song.isBlank() || artist.isBlank()) {
+            Log.i(TAG, "PIXEL_HEURISTIC_DE_REJECT song='$song' artist='$artist' score=$bestScore")
             return null
         }
 
         learnArtist(artist)
+        Log.i(TAG, "PIXEL_HEURISTIC_DE_OUTPUT song='$song' artist='$artist' score=$bestScore")
 
         return song to artist
     }
@@ -1338,6 +1443,8 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             val sourcePackage: String,
             val sourceType: String,
             val artworkUrl: String? = null,
+            val albumName: String? = null,
+            val durationSec: Int? = null,
         )
 
         private const val UNKNOWN_ARTIST = "Artista desconocido"
@@ -1359,7 +1466,7 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             "esta sonando",
             "ahora",
         )
-        private const val DEBUG_SESSION_SNAPSHOT_LOGS = true
+        private const val DEBUG_SESSION_SNAPSHOT_FLAG_FILE = "debug_session_snapshot.flag"
         private val METADATA_LONG_KEYS = setOf(
             MediaMetadata.METADATA_KEY_DURATION,
             MediaMetadata.METADATA_KEY_YEAR,
@@ -1367,6 +1474,26 @@ class NowPlayingNotificationListener : NotificationListenerService() {
             MediaMetadata.METADATA_KEY_NUM_TRACKS,
             MediaMetadata.METADATA_KEY_DISC_NUMBER,
             MediaMetadata.METADATA_KEY_BT_FOLDER_TYPE,
+        )
+        private val METADATA_TEXT_KEYS = setOf(
+            MediaMetadata.METADATA_KEY_MEDIA_ID,
+            MediaMetadata.METADATA_KEY_TITLE,
+            MediaMetadata.METADATA_KEY_ARTIST,
+            MediaMetadata.METADATA_KEY_ALBUM,
+            MediaMetadata.METADATA_KEY_ALBUM_ARTIST,
+            MediaMetadata.METADATA_KEY_WRITER,
+            MediaMetadata.METADATA_KEY_AUTHOR,
+            MediaMetadata.METADATA_KEY_COMPOSER,
+            MediaMetadata.METADATA_KEY_COMPILATION,
+            MediaMetadata.METADATA_KEY_DATE,
+            MediaMetadata.METADATA_KEY_GENRE,
+            MediaMetadata.METADATA_KEY_DISPLAY_TITLE,
+            MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE,
+            MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION,
+            MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
+            MediaMetadata.METADATA_KEY_MEDIA_URI,
+            MediaMetadata.METADATA_KEY_ART_URI,
+            MediaMetadata.METADATA_KEY_ALBUM_ART_URI,
         )
         private val METADATA_BITMAP_KEYS = setOf(
             MediaMetadata.METADATA_KEY_ART,

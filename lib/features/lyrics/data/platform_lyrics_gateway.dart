@@ -147,6 +147,8 @@ class PlatformLyricsGateway {
     required String title,
     required String artist,
     required bool preferSynced,
+    String? albumName,
+    int? durationSec,
   }) async {
     final response = await _lyricsMethodsChannel.invokeMethod<dynamic>(
       'fetchLyrics',
@@ -154,6 +156,8 @@ class PlatformLyricsGateway {
         'title': title,
         'artist': artist,
         'preferSynced': preferSynced,
+        'albumName': albumName,
+        'durationSec': durationSec,
       },
     );
 

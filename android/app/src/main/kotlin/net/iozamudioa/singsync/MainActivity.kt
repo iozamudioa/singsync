@@ -130,6 +130,8 @@ class MainActivity: FlutterActivity() {
 		).setMethodCallHandler { call, result ->
 			val title = call.argument<String>("title").orEmpty()
 			val artist = call.argument<String>("artist").orEmpty()
+			val albumName = call.argument<String>("albumName")?.trim()?.takeIf { it.isNotEmpty() }
+			val durationSec = call.argument<Int>("durationSec")?.takeIf { it > 0 }
 			val query = call.argument<String>("query").orEmpty()
 			val preferSynced = call.argument<Boolean>("preferSynced") == true
 
@@ -141,7 +143,13 @@ class MainActivity: FlutterActivity() {
 					}
 
 					Thread {
-						val payload = LyricsProviderRegistry.active.fetchLyrics(title, artist, preferSynced)
+						val payload = LyricsProviderRegistry.active.fetchLyrics(
+							title = title,
+							artist = artist,
+							preferSynced = preferSynced,
+							albumName = albumName,
+							durationSec = durationSec,
+						)
 						runOnUiThread {
 							result.success(payload)
 						}

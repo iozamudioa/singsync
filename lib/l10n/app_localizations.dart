@@ -512,6 +512,12 @@ abstract class AppLocalizations {
   /// **'Mis canciones'**
   String get mySongsTitle;
 
+  /// No description provided for @catchemTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Catchem'**
+  String get catchemTitle;
+
   /// No description provided for @searchBySongOrArtist.
   ///
   /// In es, this message translates to:
@@ -529,6 +535,132 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'No hay favoritos aún'**
   String get noFavoritesYet;
+
+  /// No description provided for @noCatchemYet.
+  ///
+  /// In es, this message translates to:
+  /// **'Aún no has atrapado canciones'**
+  String get noCatchemYet;
+
+  /// No description provided for @catchemDeleted.
+  ///
+  /// In es, this message translates to:
+  /// **'Canción eliminada de Catchem'**
+  String get catchemDeleted;
+
+  /// No description provided for @catchemDetectionCount.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =1{# escucha} other{# escuchas}}'**
+  String catchemDetectionCount(num count);
+
+  /// No description provided for @catchemCaptureMode.
+  ///
+  /// In es, this message translates to:
+  /// **'Captura: {mode}'**
+  String catchemCaptureMode(Object mode);
+
+  /// No description provided for @catchemCaptureManual.
+  ///
+  /// In es, this message translates to:
+  /// **'Manual'**
+  String get catchemCaptureManual;
+
+  /// No description provided for @catchemCaptureAutomatic.
+  ///
+  /// In es, this message translates to:
+  /// **'Automática'**
+  String get catchemCaptureAutomatic;
+
+  /// No description provided for @catchemCaptureHistoryTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Capturas de {song}'**
+  String catchemCaptureHistoryTitle(Object song);
+
+  /// No description provided for @catchemLastHeard.
+  ///
+  /// In es, this message translates to:
+  /// **'Última vez escuchada fecha: {date} hora: {time}'**
+  String catchemLastHeard(Object date, Object time);
+
+  /// No description provided for @catchemTimestamp.
+  ///
+  /// In es, this message translates to:
+  /// **'Fecha: {date} Hora: {time}'**
+  String catchemTimestamp(Object date, Object time);
+
+  /// No description provided for @catchemTimestampUnknown.
+  ///
+  /// In es, this message translates to:
+  /// **'Fecha: --/--/---- Hora: --:--'**
+  String get catchemTimestampUnknown;
+
+  /// No description provided for @catchemOpenMap.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver mapa de capturas'**
+  String get catchemOpenMap;
+
+  /// No description provided for @catchemMapTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Mapa de canciones capturadas'**
+  String get catchemMapTitle;
+
+  /// No description provided for @catchemMapNoPoints.
+  ///
+  /// In es, this message translates to:
+  /// **'Aún no hay capturas con ubicación'**
+  String get catchemMapNoPoints;
+
+  /// No description provided for @catchemLyricsSource.
+  ///
+  /// In es, this message translates to:
+  /// **'Fuente: {source}'**
+  String catchemLyricsSource(Object source);
+
+  /// No description provided for @catchemSourceCache.
+  ///
+  /// In es, this message translates to:
+  /// **'caché local'**
+  String get catchemSourceCache;
+
+  /// No description provided for @catchemSourceGetCached.
+  ///
+  /// In es, this message translates to:
+  /// **'LRCLIB GET-CACHED'**
+  String get catchemSourceGetCached;
+
+  /// No description provided for @catchemSourceGet.
+  ///
+  /// In es, this message translates to:
+  /// **'LRCLIB GET'**
+  String get catchemSourceGet;
+
+  /// No description provided for @catchemSourceSearchTrackArtist.
+  ///
+  /// In es, this message translates to:
+  /// **'LRCLIB SEARCH track/artist'**
+  String get catchemSourceSearchTrackArtist;
+
+  /// No description provided for @catchemSourceSearchQuery.
+  ///
+  /// In es, this message translates to:
+  /// **'LRCLIB SEARCH q'**
+  String get catchemSourceSearchQuery;
+
+  /// No description provided for @catchemSourceLrclib.
+  ///
+  /// In es, this message translates to:
+  /// **'LRCLIB'**
+  String get catchemSourceLrclib;
+
+  /// No description provided for @catchemSourceUnknown.
+  ///
+  /// In es, this message translates to:
+  /// **'desconocida'**
+  String get catchemSourceUnknown;
 
   /// No description provided for @savedSnapshotsTitle.
   ///

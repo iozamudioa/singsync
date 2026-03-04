@@ -18,8 +18,10 @@ data class ApiHttpResponse(
 class ApiHttpHelper(
     private val connectTimeoutMs: Int = 20_000,
     private val readTimeoutMs: Int = 25_000,
-    private val userAgent: String =
-        "SingSync v1.0.0 (https://github.com/iozamudioa/singsync)",
+    private val userAgent: String = run {
+        val versionName = net.iozamudioa.singsync.BuildConfig.VERSION_NAME.trim().ifEmpty { "unknown" }
+        "SingSync v$versionName (https://github.com/iozamudioa/singsync)"
+    },
 ) {
     fun getWithRetry(
         url: String,

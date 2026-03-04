@@ -90,9 +90,63 @@
   "removeFromFavorites": "Quitar de favoritos",
   "favoritesLibrary": "Biblioteca",
   "mySongsTitle": "Mis canciones",
+  "catchemTitle": "Catchem",
   "searchBySongOrArtist": "Buscar por canción o artista",
   "noResults": "Sin resultados",
   "noFavoritesYet": "No hay favoritos aún",
+  "noCatchemYet": "Aún no has atrapado canciones",
+  "catchemDeleted": "Canción eliminada de Catchem",
+  "catchemDetectionCount": "{count, plural, =1{# escucha} other{# escuchas}}",
+  "@catchemDetectionCount": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "catchemCaptureMode": "Captura: {mode}",
+  "@catchemCaptureMode": {
+    "placeholders": {
+      "mode": {}
+    }
+  },
+  "catchemCaptureManual": "Manual",
+  "catchemCaptureAutomatic": "Automática",
+  "catchemCaptureHistoryTitle": "Capturas de {song}",
+  "@catchemCaptureHistoryTitle": {
+    "placeholders": {
+      "song": {}
+    }
+  },
+  "catchemLastHeard": "Última vez escuchada fecha: {date} hora: {time}",
+  "@catchemLastHeard": {
+    "placeholders": {
+      "date": {},
+      "time": {}
+    }
+  },
+  "catchemTimestamp": "Fecha: {date} Hora: {time}",
+  "@catchemTimestamp": {
+    "placeholders": {
+      "date": {},
+      "time": {}
+    }
+  },
+  "catchemTimestampUnknown": "Fecha: --/--/---- Hora: --:--",
+  "catchemOpenMap": "Ver mapa de capturas",
+  "catchemMapTitle": "Mapa de canciones capturadas",
+  "catchemMapNoPoints": "Aún no hay capturas con ubicación",
+  "catchemLyricsSource": "Fuente: {source}",
+  "@catchemLyricsSource": {
+    "placeholders": {
+      "source": {}
+    }
+  },
+  "catchemSourceCache": "caché local",
+  "catchemSourceGetCached": "LRCLIB GET-CACHED",
+  "catchemSourceGet": "LRCLIB GET",
+  "catchemSourceSearchTrackArtist": "LRCLIB SEARCH track/artist",
+  "catchemSourceSearchQuery": "LRCLIB SEARCH q",
+  "catchemSourceLrclib": "LRCLIB",
+  "catchemSourceUnknown": "desconocida",
   "savedSnapshotsTitle": "Portadas para el recuerdo",
   "noSavedSnapshotsYet": "Aún no hay imágenes guardadas",
   "delete": "Borrar",

@@ -83,6 +83,7 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
   static const int _dragSeekMinPositionDeltaMs = 900;
   static const int _dragSeekHapticIntervalMs = 180;
   static const int _dragSeekHapticMinPositionDeltaMs = 320;
+  static const int _timedLineTapSeekLeadMs = 220;
   static const MethodChannel _lyricsMethodsChannel = MethodChannel(
     'net.iozamudioa.singsync/lyrics',
   );
@@ -300,9 +301,10 @@ class _NowPlayingTabState extends State<NowPlayingTab> with TickerProviderStateM
   }
 
   void _onNowPlayingTimedLineTap(int targetMs) {
+    final seekTargetMs = math.max(0, targetMs - _timedLineTapSeekLeadMs);
     final currentMs = widget.controller.nowPlayingPlaybackPositionMs;
-    _animateVinylSeekNudge(fromMs: currentMs, toMs: targetMs);
-    widget.controller.seekNowPlayingTo(targetMs);
+    _animateVinylSeekNudge(fromMs: currentMs, toMs: seekTargetMs);
+    widget.controller.seekNowPlayingTo(seekTargetMs);
   }
 
   void _syncSearchInputWithController() {

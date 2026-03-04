@@ -7,7 +7,7 @@ import io.flutter.plugin.common.EventChannel
 object NowPlayingNotificationBridge {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var sink: EventChannel.EventSink? = null
-    private var lastPayload: Map<String, String>? = null
+    private var lastPayload: Map<String, Any>? = null
 
     fun setSink(eventSink: EventChannel.EventSink?) {
         sink = eventSink
@@ -26,8 +26,10 @@ object NowPlayingNotificationBridge {
         sourcePackage: String,
         sourceType: String,
         artworkUrl: String?,
+        albumName: String?,
+        durationSec: Int?,
     ) {
-        val payload = mutableMapOf<String, String>(
+        val payload = mutableMapOf<String, Any>(
             "title" to title,
             "artist" to artist,
             "sourcePackage" to sourcePackage,
@@ -35,6 +37,12 @@ object NowPlayingNotificationBridge {
         )
         if (!artworkUrl.isNullOrBlank()) {
             payload["artworkUrl"] = artworkUrl
+        }
+        if (!albumName.isNullOrBlank()) {
+            payload["albumName"] = albumName
+        }
+        if (durationSec != null && durationSec > 0) {
+            payload["durationSec"] = durationSec
         }
         lastPayload = payload
 

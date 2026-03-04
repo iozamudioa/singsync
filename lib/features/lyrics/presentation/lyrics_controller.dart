@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../l10n/app_localizations.dart';
@@ -57,9 +58,12 @@ class LyricsController extends ChangeNotifier {
     'com.apple.android.music',
   ];
   static const String _favoritesPrefKey = 'favorite_library_v1';
+  static const String _catchemPrefKey = 'catchem_library_v1';
 
   String songTitle = 'Now Playing';
   String artistName = '';
+  String? nowPlayingAlbumName;
+  int? nowPlayingDurationSec;
   String nowPlayingSourceType = '';
   String? nowPlayingSourcePackage;
   String? preferredMediaAppPackage;
@@ -93,6 +97,8 @@ class LyricsController extends ChangeNotifier {
   String? _artistInsightInFlightKey;
   Future<ArtistInsight?>? _artistInsightInFlight;
   List<FavoriteSongEntry> _favoriteLibrary = const <FavoriteSongEntry>[];
+  List<CatchemSongEntry> _catchemLibrary = const <CatchemSongEntry>[];
+  String? _lastNowPlayingSongKey;
   bool _hasPausedPlaybackForFavorite = false;
   String? _pausedPlaybackSourcePackageForFavorite;
   String? _pausedPlaybackPreferredPackageForFavorite;
@@ -101,6 +107,7 @@ class LyricsController extends ChangeNotifier {
     refreshNotificationPermissionStatus();
     unawaited(refreshInstalledMediaApps());
     unawaited(loadFavoriteLibrary());
+    unawaited(loadCatchemLibrary());
 
     _subscription = _gateway.nowPlayingStream().listen(
       onNowPlayingEvent,
@@ -115,6 +122,18 @@ class LyricsController extends ChangeNotifier {
   }
 
   List<FavoriteSongEntry> get favoriteLibrary => List<FavoriteSongEntry>.unmodifiable(_favoriteLibrary);
+
+  List<CatchemSongEntry> get catchemLibrary {
+    final ranking = List<CatchemSongEntry>.from(_catchemLibrary);
+    ranking.sort((a, b) {
+      final byDetectCount = b.detectCount.compareTo(a.detectCount);
+      if (byDetectCount != 0) {
+        return byDetectCount;
+      }
+      return b.lastDetectedAtMs.compareTo(a.lastDetectedAtMs);
+    });
+    return List<CatchemSongEntry>.unmodifiable(ranking);
+  }
 
   bool get canResumePausedPlaybackAfterFavorite {
     return _hasPausedPlaybackForFavorite && nowPlayingSourceType == 'favorite';
@@ -187,6 +206,70 @@ class LyricsController extends ChangeNotifier {
     await prefs.setString(_favoritesPrefKey, jsonEncode(payload));
   }
 
+  Future<void> loadCatchemLibrary() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_catchemPrefKey);
+      if (raw == null || raw.trim().isEmpty) {
+        _catchemLibrary = const <CatchemSongEntry>[];
+        _notifySafely();
+        return;
+      }
+
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        _catchemLibrary = const <CatchemSongEntry>[];
+        _notifySafely();
+        return;
+      }
+
+      final parsed = <CatchemSongEntry>[];
+      for (final item in decoded) {
+        if (item is Map<String, dynamic>) {
+          final entry = CatchemSongEntry.fromJson(item);
+          if (entry.title.trim().isNotEmpty && entry.artist.trim().isNotEmpty) {
+            parsed.add(entry);
+          }
+          continue;
+        }
+        if (item is Map) {
+          final normalized = <String, dynamic>{};
+          for (final entry in item.entries) {
+            normalized[entry.key.toString()] = entry.value;
+          }
+          final parsedEntry = CatchemSongEntry.fromJson(normalized);
+          if (parsedEntry.title.trim().isNotEmpty && parsedEntry.artist.trim().isNotEmpty) {
+            parsed.add(parsedEntry);
+          }
+        }
+      }
+
+      _catchemLibrary = parsed;
+      _notifySafely();
+    } catch (_) {
+      _catchemLibrary = const <CatchemSongEntry>[];
+      _notifySafely();
+    }
+  }
+
+  Future<void> _persistCatchemLibrary() async {
+    final prefs = await SharedPreferences.getInstance();
+    final payload = _catchemLibrary.map((entry) => entry.toJson()).toList(growable: false);
+    await prefs.setString(_catchemPrefKey, jsonEncode(payload));
+  }
+
+  Future<bool> removeCatchemEntry(CatchemSongEntry entry) async {
+    final existingIndex = _catchemLibrary.indexWhere((item) => item.key == entry.key);
+    if (existingIndex < 0) {
+      return false;
+    }
+    final next = List<CatchemSongEntry>.from(_catchemLibrary)..removeAt(existingIndex);
+    _catchemLibrary = next;
+    await _persistCatchemLibrary();
+    _notifySafely();
+    return true;
+  }
+
   Future<bool?> toggleCurrentFavorite() async {
     final title = songTitle.trim();
     final artist = artistName.trim();
@@ -223,6 +306,13 @@ class LyricsController extends ChangeNotifier {
     });
     _favoriteLibrary = next.take(250).toList(growable: false);
     await _persistFavoriteLibrary();
+    await _upsertCatchemManualCapture(
+      title: title,
+      artist: artist,
+      lyrics: lyrics,
+      artworkUrl: nowPlayingArtworkUrl,
+      sourcePackage: nowPlayingSourcePackage,
+    );
     _notifySafely();
     return true;
   }
@@ -270,6 +360,8 @@ class LyricsController extends ChangeNotifier {
     isAdLikeNowPlaying = false;
     nowPlayingSourceType = 'favorite';
     nowPlayingSourcePackage = null;
+    nowPlayingAlbumName = null;
+    nowPlayingDurationSec = null;
     preferredMediaAppPackage = null;
 
     songTitle = favorite.title;
@@ -279,6 +371,143 @@ class LyricsController extends ChangeNotifier {
 
     isManualSearchMode = false;
     isManualSearchFormVisible = false;
+    _notifySafely();
+  }
+
+  Future<void> showCatchemInNowPlaying(CatchemSongEntry catchem) async {
+    final shouldPauseCurrentPlayback =
+        hasActiveNowPlaying && isNowPlayingFromMediaPlayer && isNowPlayingPlaybackActive;
+
+    if (shouldPauseCurrentPlayback) {
+      final sourcePackageBeforePause = nowPlayingSourcePackage;
+      final preferredPackageBeforePause = preferredMediaAppPackage;
+      _armNoPlaybackGraceWindow();
+      final didPause = await _gateway.mediaPlayPause(sourcePackage: sourcePackageBeforePause);
+
+      if (didPause) {
+        _hasPausedPlaybackForFavorite = true;
+        _pausedPlaybackSourcePackageForFavorite = sourcePackageBeforePause;
+        _pausedPlaybackPreferredPackageForFavorite = preferredPackageBeforePause;
+      } else if (!_hasPausedPlaybackForFavorite) {
+        _clearPausedPlaybackRestoreState();
+      }
+    }
+
+    ++_nowPlayingRequestId;
+    _lastAutoLookupKey = null;
+    _stopPlaybackPolling();
+
+    hasActiveNowPlaying = true;
+    isNowPlayingPlaybackActive = false;
+    nowPlayingPlaybackPositionMs = 0;
+    isLoadingNowPlayingLyrics = false;
+    isAdLikeNowPlaying = false;
+    nowPlayingSourceType = 'catchem';
+    nowPlayingSourcePackage = null;
+    nowPlayingAlbumName = null;
+    nowPlayingDurationSec = null;
+    preferredMediaAppPackage = null;
+
+    songTitle = catchem.title;
+    artistName = catchem.artist;
+    nowPlayingArtworkUrl = catchem.artworkUrl;
+    nowPlayingLyrics = catchem.lyrics.trim().isEmpty ? _notFoundMessage : catchem.lyrics;
+
+    isManualSearchMode = false;
+    isManualSearchFormVisible = false;
+    _notifySafely();
+  }
+
+  Future<void> _captureCatchemDetection({
+    required String title,
+    required String artist,
+    required String? sourcePackage,
+  }) async {
+    final songKey = _favoriteKey(title: title, artist: artist);
+
+    final position = await _tryGetLocation();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final existingIndex = _catchemLibrary.indexWhere((entry) => entry.key == songKey);
+
+    if (existingIndex >= 0) {
+      final existing = _catchemLibrary[existingIndex];
+      final history = <CatchemCaptureRecord>[
+        ...existing.captureHistory,
+        CatchemCaptureRecord(
+          capturedAtMs: nowMs,
+          captureMode: 'automatic',
+        ),
+      ];
+      final updated = existing.copyWith(
+        detectCount: history.length,
+        lastDetectedAtMs: nowMs,
+        sourcePackage: (sourcePackage ?? '').trim().isEmpty ? existing.sourcePackage : sourcePackage,
+        latitude: position?.latitude ?? existing.latitude,
+        longitude: position?.longitude ?? existing.longitude,
+        artworkUrl: (nowPlayingArtworkUrl ?? '').trim().isEmpty ? existing.artworkUrl : nowPlayingArtworkUrl,
+        captureMode: 'automatic',
+        captureHistory: history,
+      );
+      final next = List<CatchemSongEntry>.from(_catchemLibrary);
+      next[existingIndex] = updated;
+      _catchemLibrary = next;
+      await _persistCatchemLibrary();
+      _notifySafely();
+      return;
+    }
+
+    final entry = CatchemSongEntry(
+      title: title,
+      artist: artist,
+      lyrics: '',
+      artworkUrl: nowPlayingArtworkUrl,
+      detectCount: 1,
+      firstDetectedAtMs: nowMs,
+      lastDetectedAtMs: nowMs,
+      sourceType: nowPlayingSourceType,
+      sourcePackage: sourcePackage,
+      lyricsSource: '',
+      captureMode: 'automatic',
+      captureHistory: <CatchemCaptureRecord>[
+        CatchemCaptureRecord(capturedAtMs: nowMs, captureMode: 'automatic'),
+      ],
+      latitude: position?.latitude,
+      longitude: position?.longitude,
+    );
+
+    _catchemLibrary = <CatchemSongEntry>[entry, ..._catchemLibrary]
+        .take(600)
+        .toList(growable: false);
+    await _persistCatchemLibrary();
+    _notifySafely();
+  }
+
+  Future<void> _touchCatchemLastHeard({
+    required String title,
+    required String artist,
+    required String sourceType,
+    required String? sourcePackage,
+  }) async {
+    final songKey = _favoriteKey(title: title, artist: artist);
+    final existingIndex = _catchemLibrary.indexWhere((entry) => entry.key == songKey);
+    if (existingIndex < 0) {
+      return;
+    }
+
+    final existing = _catchemLibrary[existingIndex];
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final updated = existing.copyWith(
+      detectCount: existing.detectCount + 1,
+      lastDetectedAtMs: nowMs,
+      sourceType: sourceType,
+      sourcePackage: (sourcePackage ?? '').trim().isEmpty ? existing.sourcePackage : sourcePackage,
+      artworkUrl: (nowPlayingArtworkUrl ?? '').trim().isEmpty ? existing.artworkUrl : nowPlayingArtworkUrl,
+    );
+
+    final next = List<CatchemSongEntry>.from(_catchemLibrary);
+    next[existingIndex] = updated;
+    _catchemLibrary = next;
+    await _persistCatchemLibrary();
     _notifySafely();
   }
 
@@ -372,6 +601,8 @@ class LyricsController extends ChangeNotifier {
       final result = await fetchLyrics(
         title: normalizedTitle,
         artist: nowArtist,
+        albumName: nowPlayingAlbumName,
+        durationSec: nowPlayingDurationSec,
         preferSynced: isNowPlayingFromMediaPlayer,
       );
       final artworkUrl = await _metadataSearchPort.findArtworkUrl(
@@ -491,6 +722,8 @@ class LyricsController extends ChangeNotifier {
     isAdLikeNowPlaying = false;
     nowPlayingSourceType = '';
     nowPlayingSourcePackage = null;
+    nowPlayingAlbumName = null;
+    nowPlayingDurationSec = null;
     songTitle = _l10n.nowPlayingDefaultTitle;
     artistName = _l10n.motivationStartPlayback;
     nowPlayingArtworkUrl = null;
@@ -535,11 +768,6 @@ class LyricsController extends ChangeNotifier {
   Future<void> startManualCandidatesFromNowPlaying() async {
     prefillManualSearchFromNowPlaying();
 
-    final recoveredLyrics = await _retryNowPlayingLyricsBeforeManualSearch();
-    if (_disposed || recoveredLyrics) {
-      return;
-    }
-
     isManualSearchMode = true;
     isManualSearchFormVisible = true;
     isSearchingLyrics = false;
@@ -547,77 +775,6 @@ class LyricsController extends ChangeNotifier {
     _resetSearchCandidates();
     searchLyrics = _l10n.manualSearchPrompt;
     _notifySafely();
-  }
-
-  Future<bool> _retryNowPlayingLyricsBeforeManualSearch() async {
-    final title = songTitle.trim();
-    final artist = artistName.trim();
-    if (title.isEmpty || artist.isEmpty || title == _l10n.nowPlayingDefaultTitle) {
-      return false;
-    }
-
-    final requestId = ++_nowPlayingRequestId;
-    const maxAttempts = 5;
-
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (_disposed || requestId != _nowPlayingRequestId) {
-        return true;
-      }
-
-      isManualSearchMode = false;
-      isManualSearchFormVisible = false;
-      isLoadingNowPlayingLyrics = true;
-      nowPlayingLyrics = _tuningLyricsMessage;
-      _notifySafely();
-
-      final normalizedTitle = _normalizeTitleForAutoSearch(title);
-      final result = await fetchLyrics(
-        title: normalizedTitle,
-        artist: artist,
-        preferSynced: isNowPlayingFromMediaPlayer,
-      );
-
-      if (_disposed || requestId != _nowPlayingRequestId) {
-        return true;
-      }
-
-      final sanitizedLyrics = _sanitizeLyricsText(result.lyrics);
-      if (_isCacheableLyrics(sanitizedLyrics)) {
-        isLoadingNowPlayingLyrics = false;
-        nowPlayingLyrics = sanitizedLyrics;
-
-        final metadata = <String, dynamic>{
-          ...(result.metadata ?? const <String, dynamic>{}),
-          'sourcePackage': nowPlayingSourcePackage ?? '',
-          'sourceType': nowPlayingSourceType,
-        };
-
-        await _songCache.upsertSong(
-          title: title,
-          artist: artist,
-          lyrics: sanitizedLyrics,
-          artworkUrl: nowPlayingArtworkUrl,
-          artistInsight: _artistInsightCacheValue,
-          metadata: metadata,
-        );
-
-        _notifySafely();
-        return true;
-      }
-
-      if (attempt < maxAttempts) {
-        await Future.delayed(const Duration(seconds: 2));
-      }
-    }
-
-    if (_disposed || requestId != _nowPlayingRequestId) {
-      return true;
-    }
-
-    isLoadingNowPlayingLyrics = false;
-    nowPlayingLyrics = _notFoundMessage;
-    _notifySafely();
-    return false;
   }
 
   void exitManualSearchMode() {
@@ -764,6 +921,9 @@ class LyricsController extends ChangeNotifier {
     final sourceType = (event['sourceType'] ?? '').toString().trim();
     final sourcePackageRaw = (event['sourcePackage'] ?? '').toString().trim();
     final sourcePackage = sourcePackageRaw.isEmpty ? null : sourcePackageRaw;
+    final albumNameRaw = (event['albumName'] ?? '').toString().trim();
+    final albumName = albumNameRaw.isEmpty ? null : albumNameRaw;
+    final durationSec = _parsePositiveInt(event['durationSec']);
     final artworkFromEventRaw = (event['artworkUrl'] ?? '').toString().trim();
     final artworkFromEvent = artworkFromEventRaw.isEmpty ? null : artworkFromEventRaw;
 
@@ -773,7 +933,8 @@ class LyricsController extends ChangeNotifier {
       return;
     }
 
-    final eventKey = '$title|$artist|$sourceType|${sourcePackage ?? ''}';
+    final eventKey =
+      '$title|$artist|${albumName ?? ''}|${durationSec ?? 0}|$sourceType|${sourcePackage ?? ''}';
     if (isLoadingNowPlayingLyrics && _lastAutoLookupKey == eventKey) {
       return;
     }
@@ -787,6 +948,8 @@ class LyricsController extends ChangeNotifier {
 
     songTitle = title;
     artistName = artist;
+    nowPlayingAlbumName = albumName;
+    nowPlayingDurationSec = durationSec;
     nowPlayingSourceType = sourceType;
     nowPlayingSourcePackage = sourcePackage;
     if (sourcePackage != null && sourcePackage.isNotEmpty) {
@@ -798,6 +961,31 @@ class LyricsController extends ChangeNotifier {
       _stopPlaybackPolling();
       nowPlayingPlaybackPositionMs = 0;
       isNowPlayingPlaybackActive = false;
+    }
+
+    final songKey = _favoriteKey(title: title, artist: artist);
+    final songChanged = _lastNowPlayingSongKey != songKey;
+    _lastNowPlayingSongKey = songKey;
+
+    if (songChanged) {
+      if (sourceType == 'pixel_now_playing') {
+        unawaited(
+          _captureCatchemDetection(
+            title: title,
+            artist: artist,
+            sourcePackage: sourcePackage,
+          ),
+        );
+      } else if (sourceType == 'media_player') {
+        unawaited(
+          _touchCatchemLastHeard(
+            title: title,
+            artist: artist,
+            sourceType: sourceType,
+            sourcePackage: sourcePackage,
+          ),
+        );
+      }
     }
 
     final isAdLikeTrack = _looksLikeAdOrAnnouncement(
@@ -839,6 +1027,8 @@ class LyricsController extends ChangeNotifier {
         requestId: requestId,
         title: title,
         artist: artist,
+        albumName: albumName,
+        durationSec: durationSec,
         sourcePackage: sourcePackage,
         sourceType: sourceType,
       ),
@@ -849,6 +1039,8 @@ class LyricsController extends ChangeNotifier {
     required int requestId,
     required String title,
     required String artist,
+    required String? albumName,
+    required int? durationSec,
     required String? sourcePackage,
     required String sourceType,
   }) async {
@@ -872,6 +1064,12 @@ class LyricsController extends ChangeNotifier {
       isLoadingNowPlayingLyrics = false;
       nowPlayingLyrics = cachedVariantLyrics;
       nowPlayingArtworkUrl = cachedSong.artworkUrl ?? nowPlayingArtworkUrl;
+      await _upsertCatchemLyricsSnapshot(
+        title: title,
+        artist: artist,
+        lyrics: _sanitizeLyricsText(cachedVariantLyrics),
+        lyricsSource: 'cache_local',
+      );
       _applyArtistInsightCache(
         songTitle: title,
         artist: artist,
@@ -886,6 +1084,8 @@ class LyricsController extends ChangeNotifier {
       requestId: requestId,
       title: normalizedTitle,
       artist: artist,
+      albumName: albumName,
+      durationSec: durationSec,
       preferSynced: isNowPlayingFromMediaPlayer,
     );
     if (_disposed || requestId != _nowPlayingRequestId) {
@@ -914,6 +1114,13 @@ class LyricsController extends ChangeNotifier {
       );
     }
 
+    await _upsertCatchemLyricsSnapshot(
+      title: title,
+      artist: artist,
+      lyrics: sanitizedLyrics,
+      lyricsSource: _resolveLyricsSourceCode(result),
+    );
+
     _notifySafely();
   }
 
@@ -921,6 +1128,8 @@ class LyricsController extends ChangeNotifier {
     required int requestId,
     required String title,
     required String artist,
+    required String? albumName,
+    required int? durationSec,
     required bool preferSynced,
   }) async {
     var lastResult = LyricsLookupResult(
@@ -941,6 +1150,8 @@ class LyricsController extends ChangeNotifier {
       final result = await fetchLyrics(
         title: title,
         artist: artist,
+        albumName: albumName,
+        durationSec: durationSec,
         preferSynced: preferSynced,
       );
 
@@ -972,6 +1183,12 @@ class LyricsController extends ChangeNotifier {
     final hasEventArtwork = artworkFromEvent != null && artworkFromEvent.trim().isNotEmpty;
     final shouldAlwaysSearchArtwork = sourceType == 'pixel_now_playing';
 
+    if (shouldAlwaysSearchArtwork) {
+      debugPrint(
+        '[PIXEL_ARTWORK] lookup start title="$title" artist="$artist" eventArtworkPresent=$hasEventArtwork',
+      );
+    }
+
     if (hasEventArtwork && !shouldAlwaysSearchArtwork) {
       if (_disposed || requestId != _nowPlayingRequestId) {
         return;
@@ -988,16 +1205,26 @@ class LyricsController extends ChangeNotifier {
       artist: artist,
     );
 
+    if (shouldAlwaysSearchArtwork) {
+      debugPrint('[PIXEL_ARTWORK] lookup result url="${artworkUrl ?? ''}"');
+    }
+
     if (_disposed || requestId != _nowPlayingRequestId) {
       return;
     }
 
     if ((artworkUrl ?? '').isEmpty) {
+      if (shouldAlwaysSearchArtwork) {
+        debugPrint('[PIXEL_ARTWORK] lookup miss');
+      }
       return;
     }
 
     if (nowPlayingArtworkUrl != artworkUrl) {
       nowPlayingArtworkUrl = artworkUrl;
+      if (shouldAlwaysSearchArtwork) {
+        debugPrint('[PIXEL_ARTWORK] applied artworkUrl');
+      }
       _notifySafely();
     }
   }
@@ -1192,6 +1419,8 @@ class LyricsController extends ChangeNotifier {
     final result = await fetchLyrics(
       title: normalizedTitle,
       artist: artist,
+      albumName: nowPlayingAlbumName,
+      durationSec: nowPlayingDurationSec,
       preferSynced: isNowPlayingFromMediaPlayer,
     );
     final artworkUrl = await _metadataSearchPort.findArtworkUrl(
@@ -1322,16 +1551,17 @@ class LyricsController extends ChangeNotifier {
     required String title,
     required String artist,
     required bool preferSynced,
+    String? albumName,
+    int? durationSec,
   }) async {
     try {
       final result = await _gateway.fetchLyrics(
         title: title,
         artist: artist,
         preferSynced: preferSynced,
+        albumName: albumName,
+        durationSec: durationSec,
       );
-      for (final step in result.debugSteps) {
-        debugPrint('[LRCLIB_NATIVE] $step');
-      }
 
       if (result.lyrics.isNotEmpty) {
         return result;
@@ -1419,6 +1649,173 @@ class LyricsController extends ChangeNotifier {
   bool _isRetryableMessage(String message) {
     final normalized = _sanitizeLyricsText(message);
     return normalized == _l10n.lrclibUnavailable || normalized == _notFoundMessage;
+  }
+
+  int? _parsePositiveInt(dynamic value) {
+    if (value is int) {
+      return value > 0 ? value : null;
+    }
+    if (value is double) {
+      return value > 0 ? value.round() : null;
+    }
+    if (value is String) {
+      final parsed = int.tryParse(value.trim());
+      if (parsed != null && parsed > 0) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
+  String _resolveLyricsSourceCode(LyricsLookupResult result) {
+    for (final step in result.debugSteps) {
+      final normalized = step.toLowerCase();
+      if (normalized.contains('get-cached hit')) {
+        return 'lrclib_get_cached';
+      }
+      if (normalized.contains('get hit')) {
+        return 'lrclib_get';
+      }
+      if (normalized.contains('search(track/artist) hit')) {
+        return 'lrclib_search_track_artist';
+      }
+      if (normalized.contains('search(q) hit')) {
+        return 'lrclib_search_q';
+      }
+    }
+
+    final metadata = result.metadata ?? const <String, dynamic>{};
+    final metadataAlbum = (metadata['albumName'] ?? '').toString().trim();
+    if (metadataAlbum.isNotEmpty) {
+      return 'lrclib';
+    }
+    return '';
+  }
+
+  Future<Position?> _tryGetLocation() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        return null;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 6),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _upsertCatchemLyricsSnapshot({
+    required String title,
+    required String artist,
+    required String lyrics,
+    required String lyricsSource,
+  }) async {
+    final songKey = _favoriteKey(title: title, artist: artist);
+    final existingIndex = _catchemLibrary.indexWhere((entry) => entry.key == songKey);
+    if (existingIndex < 0) {
+      return;
+    }
+
+    final existing = _catchemLibrary[existingIndex];
+    final nextLyrics = lyrics.trim().isEmpty ? existing.lyrics : lyrics;
+    final nextSource = lyricsSource.trim().isEmpty ? existing.lyricsSource : lyricsSource;
+    final nextArtwork = (nowPlayingArtworkUrl ?? '').trim().isEmpty
+        ? existing.artworkUrl
+        : nowPlayingArtworkUrl;
+
+    final updated = existing.copyWith(
+      lyrics: nextLyrics,
+      lyricsSource: nextSource,
+      artworkUrl: nextArtwork,
+    );
+
+    if (updated.lyrics == existing.lyrics &&
+        updated.lyricsSource == existing.lyricsSource &&
+        updated.artworkUrl == existing.artworkUrl) {
+      return;
+    }
+
+    final next = List<CatchemSongEntry>.from(_catchemLibrary);
+    next[existingIndex] = updated;
+    _catchemLibrary = next;
+    await _persistCatchemLibrary();
+    _notifySafely();
+  }
+
+  Future<void> _upsertCatchemManualCapture({
+    required String title,
+    required String artist,
+    required String lyrics,
+    required String? artworkUrl,
+    required String? sourcePackage,
+  }) async {
+    final songKey = _favoriteKey(title: title, artist: artist);
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final existingIndex = _catchemLibrary.indexWhere((entry) => entry.key == songKey);
+
+    if (existingIndex >= 0) {
+      final existing = _catchemLibrary[existingIndex];
+      final history = <CatchemCaptureRecord>[
+        ...existing.captureHistory,
+        CatchemCaptureRecord(
+          capturedAtMs: nowMs,
+          captureMode: 'manual',
+        ),
+      ];
+      final updated = existing.copyWith(
+        detectCount: history.length,
+        lastDetectedAtMs: nowMs,
+        lyrics: lyrics.trim().isEmpty ? existing.lyrics : lyrics,
+        artworkUrl: (artworkUrl ?? '').trim().isEmpty ? existing.artworkUrl : artworkUrl,
+        sourcePackage: (sourcePackage ?? '').trim().isEmpty ? existing.sourcePackage : sourcePackage,
+        captureMode: 'manual',
+        captureHistory: history,
+      );
+      final next = List<CatchemSongEntry>.from(_catchemLibrary);
+      next[existingIndex] = updated;
+      _catchemLibrary = next;
+      await _persistCatchemLibrary();
+      return;
+    }
+
+    final entry = CatchemSongEntry(
+      title: title,
+      artist: artist,
+      lyrics: lyrics,
+      artworkUrl: artworkUrl,
+      detectCount: 1,
+      firstDetectedAtMs: nowMs,
+      lastDetectedAtMs: nowMs,
+      sourceType: nowPlayingSourceType,
+      sourcePackage: sourcePackage,
+      lyricsSource: '',
+      captureMode: 'manual',
+      captureHistory: <CatchemCaptureRecord>[
+        CatchemCaptureRecord(capturedAtMs: nowMs, captureMode: 'manual'),
+      ],
+      latitude: null,
+      longitude: null,
+    );
+
+    _catchemLibrary = <CatchemSongEntry>[entry, ..._catchemLibrary]
+        .take(600)
+        .toList(growable: false);
+    await _persistCatchemLibrary();
   }
 
   bool _isCacheableLyrics(String lyrics) {
@@ -1685,6 +2082,172 @@ class FavoriteSongEntry {
           ? null
           : json['artworkUrl'].toString(),
       createdAtMs: (json['createdAtMs'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class CatchemSongEntry {
+  const CatchemSongEntry({
+    required this.title,
+    required this.artist,
+    required this.lyrics,
+    required this.artworkUrl,
+    required this.detectCount,
+    required this.firstDetectedAtMs,
+    required this.lastDetectedAtMs,
+    required this.sourceType,
+    required this.sourcePackage,
+    required this.lyricsSource,
+    required this.captureMode,
+    required this.captureHistory,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  final String title;
+  final String artist;
+  final String lyrics;
+  final String? artworkUrl;
+  final int detectCount;
+  final int firstDetectedAtMs;
+  final int lastDetectedAtMs;
+  final String sourceType;
+  final String? sourcePackage;
+  final String lyricsSource;
+  final String captureMode;
+  final List<CatchemCaptureRecord> captureHistory;
+  final double? latitude;
+  final double? longitude;
+
+  String get key => '${title.trim().toLowerCase()}|${artist.trim().toLowerCase()}';
+
+  CatchemSongEntry copyWith({
+    String? title,
+    String? artist,
+    String? lyrics,
+    String? artworkUrl,
+    int? detectCount,
+    int? firstDetectedAtMs,
+    int? lastDetectedAtMs,
+    String? sourceType,
+    String? sourcePackage,
+    String? lyricsSource,
+    String? captureMode,
+    List<CatchemCaptureRecord>? captureHistory,
+    double? latitude,
+    double? longitude,
+  }) {
+    return CatchemSongEntry(
+      title: title ?? this.title,
+      artist: artist ?? this.artist,
+      lyrics: lyrics ?? this.lyrics,
+      artworkUrl: artworkUrl ?? this.artworkUrl,
+      detectCount: detectCount ?? this.detectCount,
+      firstDetectedAtMs: firstDetectedAtMs ?? this.firstDetectedAtMs,
+      lastDetectedAtMs: lastDetectedAtMs ?? this.lastDetectedAtMs,
+      sourceType: sourceType ?? this.sourceType,
+      sourcePackage: sourcePackage ?? this.sourcePackage,
+      lyricsSource: lyricsSource ?? this.lyricsSource,
+      captureMode: captureMode ?? this.captureMode,
+      captureHistory: captureHistory ?? this.captureHistory,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'title': title,
+      'artist': artist,
+      'lyrics': lyrics,
+      'artworkUrl': artworkUrl,
+      'detectCount': detectCount,
+      'firstDetectedAtMs': firstDetectedAtMs,
+      'lastDetectedAtMs': lastDetectedAtMs,
+      'sourceType': sourceType,
+      'sourcePackage': sourcePackage,
+      'lyricsSource': lyricsSource,
+      'captureMode': captureMode,
+      'captureHistory': captureHistory.map((entry) => entry.toJson()).toList(growable: false),
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+  }
+
+  factory CatchemSongEntry.fromJson(Map<String, dynamic> json) {
+    final rawDetectCount = (json['detectCount'] as num?)?.toInt() ?? 1;
+    final detectCount = rawDetectCount <= 0 ? 1 : rawDetectCount;
+    final firstDetectedAtMs = (json['firstDetectedAtMs'] as num?)?.toInt() ?? 0;
+    final lastDetectedAtMs = (json['lastDetectedAtMs'] as num?)?.toInt() ?? firstDetectedAtMs;
+    final captureMode = (json['captureMode'] ?? 'automatic').toString();
+
+    final rawHistory = json['captureHistory'];
+    final parsedHistory = <CatchemCaptureRecord>[];
+    if (rawHistory is List) {
+      for (final item in rawHistory) {
+        if (item is Map<String, dynamic>) {
+          parsedHistory.add(CatchemCaptureRecord.fromJson(item));
+        } else if (item is Map) {
+          final normalized = <String, dynamic>{};
+          for (final entry in item.entries) {
+            normalized[entry.key.toString()] = entry.value;
+          }
+          parsedHistory.add(CatchemCaptureRecord.fromJson(normalized));
+        }
+      }
+    }
+    if (parsedHistory.isEmpty) {
+      parsedHistory.add(
+        CatchemCaptureRecord(
+          capturedAtMs: lastDetectedAtMs,
+          captureMode: captureMode,
+        ),
+      );
+    }
+
+    return CatchemSongEntry(
+      title: (json['title'] ?? '').toString(),
+      artist: (json['artist'] ?? '').toString(),
+      lyrics: (json['lyrics'] ?? '').toString(),
+      artworkUrl: (json['artworkUrl'] ?? '').toString().trim().isEmpty
+          ? null
+          : json['artworkUrl'].toString(),
+      detectCount: detectCount,
+      firstDetectedAtMs: firstDetectedAtMs,
+      lastDetectedAtMs: lastDetectedAtMs,
+      sourceType: (json['sourceType'] ?? '').toString(),
+      sourcePackage: (json['sourcePackage'] ?? '').toString().trim().isEmpty
+          ? null
+          : json['sourcePackage'].toString(),
+      lyricsSource: (json['lyricsSource'] ?? '').toString(),
+      captureMode: captureMode,
+      captureHistory: parsedHistory,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+    );
+  }
+}
+
+class CatchemCaptureRecord {
+  const CatchemCaptureRecord({
+    required this.capturedAtMs,
+    required this.captureMode,
+  });
+
+  final int capturedAtMs;
+  final String captureMode;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'capturedAtMs': capturedAtMs,
+      'captureMode': captureMode,
+    };
+  }
+
+  factory CatchemCaptureRecord.fromJson(Map<String, dynamic> json) {
+    return CatchemCaptureRecord(
+      capturedAtMs: (json['capturedAtMs'] as num?)?.toInt() ?? 0,
+      captureMode: (json['captureMode'] ?? 'automatic').toString(),
     );
   }
 }

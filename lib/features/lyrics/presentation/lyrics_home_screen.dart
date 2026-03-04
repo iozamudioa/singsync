@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
@@ -969,11 +973,16 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             children: [
               Expanded(
                 child: Text(
-                  l10n.mySongsTitle,
+                  l10n.catchemTitle,
                   style: theme.textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+              ),
+              IconButton(
+                onPressed: _showCatchemMap,
+                icon: const Icon(Icons.public_rounded),
+                tooltip: l10n.catchemOpenMap,
               ),
               IconButton(
                 onPressed: _toggleFavoritesSearch,
@@ -1015,8 +1024,8 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
             child: AnimatedBuilder(
               animation: widget.controller,
               builder: (context, _) {
-                final favorites = widget.controller.favoriteLibrary;
-                final filteredFavorites = favorites.where((item) {
+                final entries = widget.controller.catchemLibrary;
+                final filteredEntries = entries.where((item) {
                   if (favoritesSearchQuery.isEmpty) {
                     return true;
                   }
@@ -1031,10 +1040,10 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                   return terms.every(searchable.contains);
                 }).toList(growable: false);
 
-                if (filteredFavorites.isEmpty) {
+                if (filteredEntries.isEmpty) {
                   return Center(
                     child: Text(
-                      favoritesSearchQuery.isEmpty ? l10n.noFavoritesYet : l10n.noResults,
+                      favoritesSearchQuery.isEmpty ? l10n.noCatchemYet : l10n.noResults,
                       style: theme.textTheme.bodyLarge,
                       textAlign: TextAlign.center,
                     ),
@@ -1042,12 +1051,21 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                 }
 
                 return ListView.separated(
-                  itemCount: filteredFavorites.length,
+                  itemCount: filteredEntries.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
-                    final item = filteredFavorites[index];
+                    final item = filteredEntries[index];
+                    final detectCountLabel = l10n.catchemDetectionCount(item.detectCount);
+                    final captureModeLabel = _localizedCaptureModeLabel(l10n, item.captureMode);
+                    final timestampLabel = _catchemTimestampLabel(l10n, item.lastDetectedAtMs);
+                    final subtitleParts = <String>[
+                      item.artist,
+                      detectCountLabel,
+                      l10n.catchemCaptureMode(captureModeLabel),
+                      timestampLabel,
+                    ];
                     return Dismissible(
-                      key: ValueKey('favorite_${item.key}_${item.createdAtMs}'),
+                      key: ValueKey('catchem_${item.key}_${item.lastDetectedAtMs}'),
                       direction: DismissDirection.horizontal,
                       background: Container(
                         color: theme.colorScheme.errorContainer,
@@ -1068,49 +1086,78 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                         ),
                       ),
                       onDismissed: (_) async {
-                        final removed = await widget.controller.removeFavoriteEntry(item);
+                        final removed = await widget.controller.removeCatchemEntry(item);
                         if (!removed || !mounted) {
                           return;
                         }
                         AppTopFeedback.show(
                           this.context,
-                          AppLocalizations.of(this.context).favoriteDeleted,
+                          AppLocalizations.of(this.context).catchemDeleted,
                           duration: const Duration(milliseconds: 1300),
                         );
                       },
-                      child: ListTile(
-                        leading: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: _buildArtworkImageProvider(item.artworkUrl) == null
-                              ? const SizedBox(
-                                  width: 42,
-                                  height: 42,
-                                  child: ColoredBox(color: Colors.black12),
-                                )
-                              : Image(
-                                  image: _buildArtworkImageProvider(item.artworkUrl)!,
-                                  width: 42,
-                                  height: 42,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const SizedBox(
-                                    width: 42,
-                                    height: 42,
-                                    child: ColoredBox(color: Colors.black12),
-                                  ),
+                      child: Row(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(left: 16, right: 12, top: 10, bottom: 10),
+                            child: GestureDetector(
+                              onTap: () async {
+                                await widget.controller.showCatchemInNowPlaying(item);
+                                if (!mounted) {
+                                  return;
+                                }
+                                setState(() {
+                                  _activeNavIndex = 0;
+                                });
+                              },
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: _buildArtworkImageProvider(item.artworkUrl) == null
+                                    ? const SizedBox(
+                                        width: 42,
+                                        height: 42,
+                                        child: ColoredBox(color: Colors.black12),
+                                      )
+                                    : Image(
+                                        image: _buildArtworkImageProvider(item.artworkUrl)!,
+                                        width: 42,
+                                        height: 42,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => const SizedBox(
+                                          width: 42,
+                                          height: 42,
+                                          child: ColoredBox(color: Colors.black12),
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => _showCatchemCaptureHistory(item),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      subtitleParts.join(' • '),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
                                 ),
-                        ),
-                        title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(item.artist, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () async {
-                          await widget.controller.showFavoriteInNowPlaying(item);
-                          if (!mounted) {
-                            return;
-                          }
-                          setState(() {
-                            _activeNavIndex = 0;
-                          });
-                        },
+                              ),
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.only(left: 8, right: 12),
+                            child: Icon(Icons.chevron_right_rounded),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -2390,6 +2437,262 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
     return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
+  String _localizedCaptureModeLabel(AppLocalizations l10n, String modeCode) {
+    return modeCode.trim().toLowerCase() == 'manual'
+        ? l10n.catchemCaptureManual
+        : l10n.catchemCaptureAutomatic;
+  }
+
+  String _catchemTimestampLabel(AppLocalizations l10n, int epochMs) {
+    if (epochMs <= 0) {
+      return l10n.catchemTimestampUnknown;
+    }
+
+    final localeTag = Localizations.localeOf(context).toLanguageTag();
+    final date = DateFormat('dd/MM/yyyy', localeTag)
+        .format(DateTime.fromMillisecondsSinceEpoch(epochMs));
+    final time = DateFormat('HH:mm', localeTag)
+        .format(DateTime.fromMillisecondsSinceEpoch(epochMs));
+    return l10n.catchemLastHeard(date, time);
+  }
+
+  Future<void> _showCatchemCaptureHistory(CatchemSongEntry item) async {
+    final l10n = AppLocalizations.of(context);
+    final sortedHistory = List<CatchemCaptureRecord>.from(item.captureHistory)
+      ..sort((a, b) => b.capturedAtMs.compareTo(a.capturedAtMs));
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        return SizedBox(
+          height: MediaQuery.of(sheetContext).size.height * 0.72,
+          child: Column(
+            children: [
+              ListTile(
+                title: Text(
+                  l10n.catchemCaptureHistoryTitle(item.title),
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  tooltip: l10n.close,
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                ),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: sortedHistory.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final capture = sortedHistory[index];
+                    final mode = _localizedCaptureModeLabel(l10n, capture.captureMode);
+                    final timestamp = _catchemTimestampLabel(l10n, capture.capturedAtMs);
+                    return ListTile(
+                      leading: Icon(
+                        capture.captureMode.trim().toLowerCase() == 'manual'
+                            ? Icons.favorite_rounded
+                            : Icons.auto_awesome_rounded,
+                      ),
+                      title: Text(l10n.catchemCaptureMode(mode)),
+                      subtitle: Text(timestamp),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  List<_CatchemCluster> _clusterCatchemEntries(List<CatchemSongEntry> entries, double zoom) {
+    if (entries.isEmpty) {
+      return const <_CatchemCluster>[];
+    }
+
+    final threshold = (0.18 / math.pow(2, zoom.clamp(1.0, 20.0))).clamp(0.00008, 0.08);
+    final clusters = <_CatchemCluster>[];
+
+    for (final entry in entries) {
+      final lat = entry.latitude;
+      final lng = entry.longitude;
+      if (lat == null || lng == null) {
+        continue;
+      }
+
+      var merged = false;
+      for (var i = 0; i < clusters.length; i++) {
+        final cluster = clusters[i];
+        final dLat = (cluster.center.latitude - lat).abs();
+        final dLng = (cluster.center.longitude - lng).abs();
+        if (dLat <= threshold && dLng <= threshold) {
+          final updatedEntries = <CatchemSongEntry>[...cluster.entries, entry];
+          final avgLat = updatedEntries.map((item) => item.latitude ?? lat).reduce((a, b) => a + b) /
+              updatedEntries.length;
+          final avgLng = updatedEntries.map((item) => item.longitude ?? lng).reduce((a, b) => a + b) /
+              updatedEntries.length;
+          final latestEntry = updatedEntries.reduce(
+            (a, b) => a.lastDetectedAtMs >= b.lastDetectedAtMs ? a : b,
+          );
+          clusters[i] = _CatchemCluster(
+            center: LatLng(avgLat, avgLng),
+            entries: updatedEntries,
+            latestEntry: latestEntry,
+          );
+          merged = true;
+          break;
+        }
+      }
+
+      if (!merged) {
+        clusters.add(
+          _CatchemCluster(
+            center: LatLng(lat, lng),
+            entries: <CatchemSongEntry>[entry],
+            latestEntry: entry,
+          ),
+        );
+      }
+    }
+
+    return clusters;
+  }
+
+  Future<void> _showCatchemMap() async {
+    final l10n = AppLocalizations.of(context);
+    final entries = widget.controller.catchemLibrary
+        .where((entry) => entry.latitude != null && entry.longitude != null)
+        .toList(growable: false);
+
+    if (entries.isEmpty) {
+      AppTopFeedback.show(context, l10n.catchemMapNoPoints);
+      return;
+    }
+
+    final first = entries.first;
+    final center = LatLng(first.latitude!, first.longitude!);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        var currentZoom = 12.4;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final clusters = _clusterCatchemEntries(entries, currentZoom);
+            return SizedBox(
+              height: MediaQuery.of(sheetContext).size.height * 0.78,
+              child: Column(
+                children: [
+                  ListTile(
+                    title: Text(
+                      l10n.catchemMapTitle,
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: l10n.close,
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                    ),
+                  ),
+                  Expanded(
+                    child: FlutterMap(
+                      options: MapOptions(
+                        initialCenter: center,
+                        initialZoom: currentZoom,
+                        onPositionChanged: (position, _) {
+                          final nextZoom = position.zoom;
+                          if ((nextZoom - currentZoom).abs() < 0.08) {
+                            return;
+                          }
+                          setModalState(() {
+                            currentZoom = nextZoom;
+                          });
+                        },
+                      ),
+                      children: [
+                        TileLayer(
+                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'net.iozamudioa.singsync',
+                        ),
+                        MarkerLayer(
+                          markers: clusters.map((cluster) {
+                            final latest = cluster.latestEntry;
+                            final artwork = _buildArtworkImageProvider(latest.artworkUrl);
+                            return Marker(
+                              point: cluster.center,
+                              width: 60,
+                              height: 60,
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Container(
+                                    width: 52,
+                                    height: 52,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: theme.colorScheme.primary,
+                                        width: 2,
+                                      ),
+                                      image: artwork != null
+                                          ? DecorationImage(image: artwork, fit: BoxFit.cover)
+                                          : null,
+                                      color: artwork == null
+                                          ? theme.colorScheme.primaryContainer
+                                          : null,
+                                    ),
+                                    child: artwork == null
+                                        ? Icon(
+                                            Icons.music_note_rounded,
+                                            color: theme.colorScheme.onPrimaryContainer,
+                                          )
+                                        : null,
+                                  ),
+                                  if (cluster.entries.length > 1)
+                                    Positioned(
+                                      right: -4,
+                                      bottom: -2,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: theme.colorScheme.surface,
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(
+                                            color: theme.colorScheme.primary,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${cluster.entries.length}',
+                                          style: theme.textTheme.labelSmall?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            );
+                          }).toList(growable: false),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildMainPlaybackPage({
     required ThemeData theme,
     required AppLocalizations l10n,
@@ -2543,6 +2846,8 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
         final l10n = AppLocalizations.of(context);
         final artworkUrl = widget.controller.nowPlayingArtworkUrl;
         final artworkProvider = _buildArtworkImageProvider(artworkUrl);
+        final navHorizontalInset =
+          (MediaQuery.of(context).size.width * 0.16).clamp(20.0, 88.0).toDouble();
         final backgroundTransitionKey =
             '${widget.controller.songTitle.trim()}|${(artworkUrl ?? '').trim()}';
         _syncWakeLockWithPlayback(
@@ -2551,6 +2856,7 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
 
         return Scaffold(
           resizeToAvoidBottomInset: false,
+          extendBody: true,
           bottomNavigationBar: _hideHomeHeaderForExpandedVinyl
               ? null
               : SafeArea(
@@ -2558,39 +2864,53 @@ class _LyricsHomeScreenState extends State<LyricsHomeScreen> with WidgetsBinding
                   child: NavigationBarTheme(
                     data: NavigationBarThemeData(
                       height: MediaQuery.of(context).orientation == Orientation.landscape ? 58 : 66,
-                      backgroundColor: theme.colorScheme.surface.withValues(alpha: 0.82),
+                      backgroundColor: Colors.transparent,
+                      indicatorColor: Colors.transparent,
+                      iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((states) {
+                        final isSelected = states.contains(WidgetState.selected);
+                        return IconThemeData(
+                          size: isSelected ? 28 : 24,
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: isSelected ? 0.96 : 0.58,
+                          ),
+                        );
+                      }),
                       indicatorShape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),
                     ),
-                    child: NavigationBar(
-                      selectedIndex: _activeNavIndex,
-                      onDestinationSelected: (index) {
-                        unawaited(_handleNavTap(index));
-                      },
-                      labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-                      destinations: [
-                        const NavigationDestination(
-                          icon: Icon(Icons.album_outlined),
-                          selectedIcon: Icon(Icons.album_rounded),
-                          label: '',
-                        ),
-                        NavigationDestination(
-                          icon: Icon(Icons.photo_library_outlined, key: _galleryNavIconKey),
-                          selectedIcon: const Icon(Icons.photo_library_rounded),
-                          label: '',
-                        ),
-                        const NavigationDestination(
-                          icon: Icon(Icons.library_music_outlined),
-                          selectedIcon: Icon(Icons.library_music_rounded),
-                          label: '',
-                        ),
-                        const NavigationDestination(
-                          icon: Icon(Icons.more_vert_rounded),
-                          selectedIcon: Icon(Icons.more_vert_rounded),
-                          label: '',
-                        ),
-                      ],
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: navHorizontalInset),
+                      child: NavigationBar(
+                        backgroundColor: Colors.transparent,
+                        selectedIndex: _activeNavIndex,
+                        onDestinationSelected: (index) {
+                          unawaited(_handleNavTap(index));
+                        },
+                        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+                        destinations: [
+                          const NavigationDestination(
+                            icon: Icon(Icons.album_outlined),
+                            selectedIcon: Icon(Icons.album_rounded),
+                            label: '',
+                          ),
+                          NavigationDestination(
+                            icon: Icon(Icons.photo_library_outlined, key: _galleryNavIconKey),
+                            selectedIcon: const Icon(Icons.photo_library_rounded),
+                            label: '',
+                          ),
+                          const NavigationDestination(
+                            icon: Icon(Icons.library_music_outlined),
+                            selectedIcon: Icon(Icons.library_music_rounded),
+                            label: '',
+                          ),
+                          const NavigationDestination(
+                            icon: Icon(Icons.more_vert_rounded),
+                            selectedIcon: Icon(Icons.more_vert_rounded),
+                            label: '',
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -2691,4 +3011,16 @@ class _SnapshotSection {
 
   final String title;
   final List<String> uris;
+}
+
+class _CatchemCluster {
+  const _CatchemCluster({
+    required this.center,
+    required this.entries,
+    required this.latestEntry,
+  });
+
+  final LatLng center;
+  final List<CatchemSongEntry> entries;
+  final CatchemSongEntry latestEntry;
 }
